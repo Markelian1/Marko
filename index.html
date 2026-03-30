@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="sq">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Regjistrime Faturash</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Aplikacion për Regjistrime Faturash</h1>
+      <p>Ruaj faturat, filtro sipas klientit dhe shkarko të dhënat në CSV.</p>
+    </header>
+
+    <section class="card">
+      <h2>Faturë e Re</h2>
+      <form id="invoiceForm">
+        <div class="grid">
+          <label>
+            Nr. Fature
+            <input type="text" id="invoiceNumber" name="invoiceNumber" required />
+          </label>
+
+          <label>
+            Data
+            <input type="date" id="invoiceDate" name="invoiceDate" required />
+          </label>
+
+          <label>
+            Klienti
+            <input type="text" id="clientName" name="clientName" required />
+          </label>
+
+          <label>
+            Vlera (€)
+            <input type="number" id="amount" name="amount" min="0" step="0.01" required />
+          </label>
+
+          <label>
+            Statusi
+            <select id="status" name="status" required>
+              <option value="E papaguar">E papaguar</option>
+              <option value="Paguar">Paguar</option>
+              <option value="Në proces">Në proces</option>
+            </select>
+          </label>
+
+          <label>
+            Përshkrimi
+            <input type="text" id="description" name="description" placeholder="Opsionale" />
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="submit">Shto faturën</button>
+          <button type="reset" class="secondary">Pastro</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="toolbar">
+        <h2>Lista e Faturave</h2>
+        <input type="text" id="searchInput" placeholder="Kërko sipas klientit ose nr. fature" />
+      </div>
+
+      <div class="summary">
+        <p>Totali i faturave: <strong id="totalInvoices">0</strong></p>
+        <p>Shuma totale: <strong id="totalAmount">0.00 €</strong></p>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Nr. Fature</th>
+              <th>Data</th>
+              <th>Klienti</th>
+              <th>Vlera</th>
+              <th>Statusi</th>
+              <th>Përshkrimi</th>
+              <th>Veprime</th>
+            </tr>
+          </thead>
+          <tbody id="invoiceTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="actions">
+        <button id="exportCsv" class="secondary">Eksporto CSV</button>
+        <button id="clearAll" class="danger">Fshi të gjitha</button>
+      </div>
+    </section>
+  </main>
+
+  <template id="invoiceRowTemplate">
+    <tr>
+      <td data-field="invoiceNumber"></td>
+      <td data-field="invoiceDate"></td>
+      <td data-field="clientName"></td>
+      <td data-field="amount"></td>
+      <td data-field="status"></td>
+      <td data-field="description"></td>
+      <td>
+        <button data-action="delete" class="danger small">Fshi</button>
+      </td>
+    </tr>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
