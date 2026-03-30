@@ -1,0 +1,100 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/index.html b/index.html
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b50c19cc55acf6669aaaa71e65b9fa58696ae4a
+--- /dev/null
++++ b/index.html
+@@ -0,0 +1,90 @@
++<!doctype html>
++<html lang="sq">
++  <head>
++    <meta charset="UTF-8" />
++    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <title>Regjistrime Faturash</title>
++    <link rel="stylesheet" href="styles.css" />
++  </head>
++  <body>
++    <main class="container">
++      <header>
++        <h1>App për Regjistrime Faturash</h1>
++        <p>Regjistro, filtro dhe monitoro faturat në një vend.</p>
++      </header>
++
++      <section class="card">
++        <h2>Shto faturë të re</h2>
++        <form id="invoice-form">
++          <div class="grid">
++            <label>
++              Nr. Faturës
++              <input type="text" id="invoiceNumber" required placeholder="p.sh. INV-2026-001" />
++            </label>
++            <label>
++              Klienti
++              <input type="text" id="client" required placeholder="Emri i klientit" />
++            </label>
++            <label>
++              Data
++              <input type="date" id="date" required />
++            </label>
++            <label>
++              Shuma (€)
++              <input type="number" id="amount" required min="0" step="0.01" placeholder="0.00" />
++            </label>
++            <label>
++              Statusi
++              <select id="status" required>
++                <option value="E papaguar">E papaguar</option>
++                <option value="E paguar">E paguar</option>
++                <option value="Pjesërisht">Pjesërisht</option>
++              </select>
++            </label>
++          </div>
++          <button type="submit">Ruaj faturën</button>
++        </form>
++      </section>
++
++      <section class="card">
++        <h2>Kontrolli i faturave</h2>
++        <div class="toolbar">
++          <input type="text" id="search" placeholder="Kërko sipas klientit ose nr. faturës" />
++          <select id="statusFilter">
++            <option value="all">Të gjitha statuset</option>
++            <option value="E paguar">E paguar</option>
++            <option value="E papaguar">E papaguar</option>
++            <option value="Pjesërisht">Pjesërisht</option>
++          </select>
++          <button id="clearAll" class="danger" type="button">Fshi të gjitha</button>
++        </div>
++
++        <div class="stats" id="stats"></div>
++
++        <div class="table-wrap">
++          <table>
++            <thead>
++              <tr>
++                <th>Nr.</th>
++                <th>Klienti</th>
++                <th>Data</th>
++                <th>Shuma</th>
++                <th>Statusi</th>
++                <th>Veprime</th>
++              </tr>
++            </thead>
++            <tbody id="invoiceTableBody"></tbody>
++          </table>
++        </div>
++      </section>
++    </main>
++
++    <template id="empty-row-template">
++      <tr>
++        <td colspan="6" class="empty">Nuk ka fatura të regjistruara.</td>
++      </tr>
++    </template>
++
++    <script src="app.js"></script>
++  </body>
++</html>
+ 
+EOF
+)
