@@ -32,8 +32,8 @@ entryLen = input.int(20, "EMA e hyrjes (pullback)", minval = 1, group = grpTrend
 grpLiq   = "Hyrjet SWEEP (likuiditet)"
 useSweep = input.bool(true, "Lejo hyrjet SWEEP", group = grpLiq)
 pvLen    = input.int(3, "Forca e swing-ut (qirinj majtas/djathtas)", minval = 1, maxval = 20, group = grpLiq)
-eqTol    = input.int(15, "Toleranca per fundet/majat e barabarta (pips)", minval = 1, group = grpLiq)
-needEq   = input.bool(true, "Vetem nivele te dyfishta (equal lows / highs)", group = grpLiq)
+eqTol    = input.int(20, "Toleranca per fundet/majat e barabarta (pips)", minval = 1, group = grpLiq)
+needEq   = input.bool(false, "Vetem nivele te dyfishta (equal lows / highs)", group = grpLiq)
 maxSweep = input.int(30, "Sweep maksimal pertej nivelit (pips)", minval = 1, group = grpLiq, tooltip = "Nese cmimi shkon me thelle, eshte thyerje e vertete, jo sweep")
 confBars = input.int(2, "Qirinj te lejuar per t'u kthyer mbrapa nivelit", minval = 0, maxval = 10, group = grpLiq)
 needBody = input.bool(true, "Qiriri i hyrjes ne drejtim te tregtimit", group = grpLiq)
