@@ -9,11 +9,13 @@
 //|  - Ekstremi (fundi per BUY, maja per SELL) eshte ne 2 qirinjte e  |
 //|    fundit dhe qiriri i fundit u mbyll ne anen e kundert.          |
 //|  - Hyrje ne treg, SL pas ekstremit + 5 pips (max 100 pips),       |
-//|    TP = 3 here SL. Nje pozicion ne te njejten kohe.               |
+//|    TP = 5 here SL. Nese pas 2 oresh as SL as TP nuk jane prekur,  |
+//|    pozicioni mbyllet me cmimin e tregut (v1.10).                  |
+//|    Nje pozicion ne te njejten kohe.                               |
 //|  Lot fiks, PA martingale.                                         |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "1.00"
+#property version   "1.10"
 #property description "Hyrje kundra levizjes se forte ne M5: BUY pas renies, SELL pas ngritjes. SL pas ekstremit, TP 3R."
 
 #include <Trade\Trade.mqh>
@@ -33,7 +35,8 @@ input bool   InpAllowSell       = true;   // SELL pas ngritjes
 input group "SL / TP"
 input int    InpSLBufPips       = 5;      // SL pas ekstremit (pips)
 input int    InpMaxSLPips       = 100;    // SL me i madh = pa hyrje
-input double InpRR              = 3.0;    // TP = kaq here SL
+input double InpRR              = 5.0;    // TP = kaq here SL
+input int    InpMaxHoldMin      = 120;    // Mbyll pozicionin pas kaq minutash (0 = pa kufi)
 
 input group "Kufizime"
 input int    InpStartHour       = 9;      // Ora e serverit
@@ -69,6 +72,8 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   CloseOldPositions();
+
    datetime bt = iTime(_Symbol, InpTF, 0);
    if(bt == 0 || bt == g_lastBar)
       return;
@@ -124,6 +129,23 @@ void OnTick()
          if(!trade.Sell(NormalizeLots(InpLots), _Symbol, 0, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), "SELL FADE"))
             Print("SELL deshtoi: ", trade.ResultRetcodeDescription());
       }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Levizja e kthimit zakonisht ndodh shpejt: pas InpMaxHoldMin       |
+//| minutash pozicioni mbyllet me cmimin e tregut.                    |
+//+------------------------------------------------------------------+
+void CloseOldPositions()
+{
+   if(InpMaxHoldMin <= 0) return;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !IsMyPosition()) continue;
+      if(TimeCurrent() - (datetime)PositionGetInteger(POSITION_TIME) >= InpMaxHoldMin * 60)
+         if(!trade.PositionClose(ticket))
+            Print("Mbyllja me kohe deshtoi: ", trade.ResultRetcodeDescription());
    }
 }
 

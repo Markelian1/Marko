@@ -23,6 +23,7 @@ class Book:
     def __init__(self):
         self.trades = []   # (bar_hyrjes, pips)
         self.pos = None
+    maxbars = 0
     def open(self, i, d, entry, sl, tp, be_r):
         risk = abs(entry - sl)
         self.pos = dict(i=i, d=d, e=entry, sl=sl, tp=tp, trig=be_r * risk if be_r > 0 else None)
@@ -33,6 +34,8 @@ class Book:
         p = self.pos
         if p is None or i <= p['i']: return
         s = S[i]
+        if self.maxbars and i - p['i'] >= self.maxbars:
+            self.close(C[i] if p['d'] == 1 else C[i] + s); return
         if p['d'] == 1:   # buy: dalja me Bid
             if L[i] <= p['sl']:
                 ex = min(O[i], p['sl']); self.close(ex); return
@@ -125,8 +128,8 @@ def setup_A(k=3, offset=10, sl=35, rr=3.0, be=1.0, mind=30, maxd=300, h0=9, h1=2
     return bk.trades
 
 # ---------------- Setup B: kundra levizjes se forte (fade) ----------------
-def setup_B(win=12, move=150, rr=2.0, buf=5, maxsl=80, be=1.0, h0=9, h1=21, maxday=3, dirs=(1, -1)):
-    bk = Book()
+def setup_B(win=12, move=150, rr=2.0, buf=5, maxsl=80, be=1.0, h0=9, h1=21, maxday=3, dirs=(1, -1), maxbars=0):
+    bk = Book(); bk.maxbars = maxbars
     day, dcount = None, 0
     for i in range(win, N - 1):
         if T[i].date() != day: day, dcount = T[i].date(), 0
@@ -153,3 +156,52 @@ def show(name, tr):
 
 if __name__ == '__main__':
     print(T[0], T[SPLIT], T[-1], N)
+
+# ---------------- Setup C: si B, me konfirmim dhe TP te kthimit ----------------
+def setup_C(win=8, move=200, buf=5, maxsl=100, conf=0, tpm='rr', rr=3.0, fib=0.5, minrr=1.0,
+            wait=6, h0=9, h1=21, maxday=3, dirs=(1, -1)):
+    """conf: 0 = qiri i kundert (si B); 1 = mbyllje mbi majen/nen fundin e qiririt te meparshem;
+             2 = mbyllje mbi majen/nen fundin e qiririt qe beri ekstremin (pritet deri 'wait' qirinj)
+       tpm:  'rr' = TP rr*R; 'fib' = TP ne kthimin 'fib' te levizjes; 'min' = me i afermi nga te dyja"""
+    bk = Book()
+    day, dcount = None, 0
+    pend = None   # impuls ne pritje te konfirmimit: (dir, ext, other_end, bar_ext, expiry)
+    for i in range(win, N - 1):
+        if T[i].date() != day: day, dcount = T[i].date(), 0
+        bk.step(i)
+        hs = H[i - win + 1:i + 1]; ls = L[i - win + 1:i + 1]
+        mx, mn = max(hs), min(ls)
+        imx = hs.index(mx); imn = ls.index(mn)
+        big = mx - mn >= move * PIP
+        # impuls i ri: ekstremi ne 2 qirinjte e fundit
+        if big and imx < imn and imn >= win - 2:
+            if pend is None or pend[0] != 1 or mn < pend[1]:
+                pend = (1, mn, mx, i - (win - 1 - imn), i + wait)
+        elif big and imn < imx and imx >= win - 2:
+            if pend is None or pend[0] != -1 or mx > pend[1]:
+                pend = (-1, mx, mn, i - (win - 1 - imx), i + wait)
+        if pend is None: continue
+        d, ext, other, bext, exp = pend
+        # ekstrem i ri e zgjat impulsin
+        if d == 1 and L[i] < ext: pend = (1, L[i], other, i, i + wait); d, ext, bext = 1, L[i], i
+        if d == -1 and H[i] > ext: pend = (-1, H[i], other, i, i + wait); d, ext, bext = -1, H[i], i
+        if i > pend[4]: pend = None; continue
+        if bk.pos is not None or not hours_ok(i, h0, h1) or dcount >= maxday or d not in dirs: continue
+        if conf == 0:
+            ok = (C[i] > O[i]) if d == 1 else (C[i] < O[i])
+        elif conf == 1:
+            ok = (C[i] > H[i - 1] and C[i] > O[i]) if d == 1 else (C[i] < L[i - 1] and C[i] < O[i])
+        else:
+            ok = (i > bext and C[i] > H[bext]) if d == 1 else (i > bext and C[i] < L[bext])
+        if not ok: continue
+        if d == 1:
+            e = O[i + 1] + S[i + 1]; slp = ext - buf * PIP; risk = e - slp
+            tp_rr = e + rr * risk; tp_f = ext + fib * (other - ext)
+        else:
+            e = O[i + 1]; slp = ext + buf * PIP + S[i + 1]; risk = slp - e
+            tp_rr = e - rr * risk; tp_f = ext - fib * (ext - other)
+        if not (0 < risk <= maxsl * PIP): continue
+        tp = tp_rr if tpm == 'rr' else tp_f if tpm == 'fib' else (min(tp_rr, tp_f) if d == 1 else max(tp_rr, tp_f))
+        if d * (tp - e) < minrr * risk: continue
+        bk.open(i + 1, d, e, slp, tp, 0); dcount += 1; pend = None
+    return bk.trades

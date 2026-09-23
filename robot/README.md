@@ -10,6 +10,12 @@ Rezultati i testit (pips, me spread-in real, pa komision): **732 hyrje, PF 1.32,
 2/3 e parë PF 1.39, 1/3 e fundit PF 1.23, 13 nga 18 muaj pozitivë.
 Kujdes: qershor–shtator 2026 ishte afërsisht zero, dhe i njëjti rregull në M1 humbi. Testeri është te `backtest/`.
 
+**MT5 (01.2025 – 09.2026, tick-e reale):** 1,411 hyrje, **PF 1.18, +1,188.51 $**, DD 352 $.
+
+**v1.10:** TP = **5R** dhe mbyllje me çmimin e tregut **pas 2 orësh** nëse as SL as TP nuk janë prekur.
+Në testerin Python: PF 1.37 (2/3 e parë 1.35, 1/3 e fundit 1.40), +11,046 pips, DD 1,102 pips, 14/18 muaj pozitivë.
+Hyrja me konfirmim (pritje e mbylljes mbi/nën qiririn e mëparshëm) u testua dhe doli **më keq**, prandaj hyrja mbetet si te v1.00.
+
 # LimitLevelXAU: urdhra LIMIT te majat dhe fundet e H1 (MT5)
 
 `LimitLevelXAU.mq5` ndjek hyrjet manuale të 23.09 (SELL LIMIT 4377.47 mbi majat e H1, BUY / BUY LIMIT pas rënies):
