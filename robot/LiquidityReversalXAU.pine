@@ -1,0 +1,322 @@
+//@version=6
+// Liquidity Reversal XAU (grafik 5m)
+// Hyrja si ne foton e cTrader (BUY 4277.75 me 23.09):
+//   1. Cmimi krijon nivele likuiditeti: fundet (ose majat) e barabarta te nje range-i.
+//   2. Cmimi i kalon me bisht (sweep), pra merr stop-et e tregtareve.
+//   3. Brenda pak qirinjve mbyllet perseri mbrapa nivelit -> hyrje ne anen e kundert.
+//   SL: pas bishtit te sweep-it. TP1: 1R. TP2: likuiditeti ne anen tjeter (maja/fundi me i afert).
+//   Pas TP1: SL ne break-even dhe trailing, si SL-ja qe ngjitet mbi hyrje ne foto.
+indicator("Liquidity Reversal XAU", shorttitle = "LRXAU", overlay = true, max_lines_count = 500, max_labels_count = 500)
+
+// ───── Inputet ─────
+grpLiq   = "Likuiditeti"
+pvLen    = input.int(3, "Forca e swing-ut (qirinj majtas/djathtas)", minval = 1, maxval = 20, group = grpLiq)
+eqTol    = input.int(15, "Toleranca per nivele te barabarta (pips)", minval = 1, group = grpLiq)
+needEq   = input.bool(true, "Vetem nivele te dyfishta (equal lows / equal highs)", group = grpLiq)
+maxSweep = input.int(40, "Sweep maksimal pertej nivelit (pips)", minval = 1, group = grpLiq, tooltip = "Nese cmimi shkon me thelle, eshte thyerje e vertete, jo sweep")
+confBars = input.int(2, "Qirinj te lejuar per t'u kthyer mbrapa nivelit", minval = 0, maxval = 10, group = grpLiq)
+needBody = input.bool(true, "Qiriri i hyrjes duhet te jete ne drejtim te tregtimit", group = grpLiq)
+showLiq  = input.bool(true, "Shfaq nivelet e likuiditetit", group = grpLiq)
+
+grpRisk  = "SL / TP"
+pipSize  = input.float(0.10, "1 pip =", step = 0.01, group = grpRisk, tooltip = "Ne ar 1 pip = 0.10$ levizje cmimi")
+slBuf    = input.int(5, "SL pas bishtit te sweep-it (pips)", minval = 0, group = grpRisk)
+minSL    = input.int(20, "SL minimal (pips)", minval = 1, group = grpRisk)
+maxSL    = input.int(60, "SL maksimal (pips)", minval = 1, group = grpRisk, tooltip = "Nese SL del me i madh, hyrja anulohet")
+tp1R     = input.float(1.0, "TP1 = kaq here SL", minval = 0.3, step = 0.1, group = grpRisk)
+minRR    = input.float(1.5, "Hyr vetem nese TP2 >= kaq here SL", minval = 0.5, step = 0.1, group = grpRisk)
+fbRR     = input.float(2.0, "TP2 kur nuk ka nivel likuiditeti (here SL)", minval = 0.5, step = 0.1, group = grpRisk)
+tpBuf    = input.int(3, "TP2 pak para nivelit (pips)", minval = 0, group = grpRisk)
+useBE    = input.bool(true, "Break-even pas TP1", group = grpRisk)
+beOffset = input.int(1, "Break-even + pips", minval = 0, group = grpRisk)
+useTrail = input.bool(true, "Trailing SL pas TP1", group = grpRisk)
+trailPip = input.int(50, "Distanca e trailing (pips)", minval = 5, group = grpRisk)
+
+grpF     = "Filtra"
+useHTF   = input.bool(false, "Mos hyr kunder trendit te forte", group = grpF)
+htf      = input.timeframe("60", "Timeframe i trendit", group = grpF)
+useSess  = input.bool(false, "Vetem brenda orarit", group = grpF)
+sess     = input.session("0300-2100", "Orari (ora e burses ne grafik)", group = grpF)
+
+grpView  = "Llogaritja"
+lotSize  = input.float(0.01, "Loti per pozicion", step = 0.01, group = grpView)
+spread   = input.float(2.0, "Spread + komision per pozicion (pips)", minval = 0, step = 0.5, group = grpView)
+
+// ───── Trendi i madh (opsional) ─────
+[hf, hs, hc] = request.security(syminfo.tickerid, htf, [ta.ema(close, 21)[1], ta.ema(close, 50)[1], close[1]], lookahead = barmerge.lookahead_on)
+htfTrend = hf > hs and hc > hf ? 1 : hf < hs and hc < hf ? -1 : 0
+buyOk    = not useHTF or htfTrend != -1
+sellOk   = not useHTF or htfTrend != 1
+
+// ───── Nivelet e likuiditetit ─────
+ph = ta.pivothigh(high, pvLen, pvLen)
+pl = ta.pivotlow(low, pvLen, pvLen)
+needCnt = needEq ? 2 : 1
+
+var array<float> loLvl = array.new<float>()
+var array<int>   loCnt = array.new<int>()
+var array<line>  loLn  = array.new<line>()
+var array<float> hiLvl = array.new<float>()
+var array<int>   hiCnt = array.new<int>()
+var array<line>  hiLn  = array.new<line>()
+
+// Fund i ri: bashkohet me nje nivel ekzistues nese eshte afer (equal lows), perndryshe nivel i ri
+if not na(pl)
+    merged = false
+    if loLvl.size() > 0
+        for k = 0 to loLvl.size() - 1
+            if math.abs(loLvl.get(k) - pl) <= eqTol * pipSize
+                lvl = math.min(loLvl.get(k), pl)
+                loLvl.set(k, lvl)
+                loCnt.set(k, loCnt.get(k) + 1)
+                ln = loLn.get(k)
+                line.set_y1(ln, lvl)
+                line.set_y2(ln, lvl)
+                line.set_style(ln, line.style_solid)
+                line.set_color(ln, color.new(color.green, 20))
+                merged := true
+                break
+    if not merged
+        loLvl.push(pl)
+        loCnt.push(1)
+        loLn.push(showLiq ? line.new(bar_index - pvLen, pl, bar_index, pl, color = color.new(color.green, 60), style = line.style_dotted, extend = extend.right) : na)
+        if loLvl.size() > 12
+            loLvl.shift()
+            loCnt.shift()
+            line.delete(loLn.shift())
+
+if not na(ph)
+    merged = false
+    if hiLvl.size() > 0
+        for k = 0 to hiLvl.size() - 1
+            if math.abs(hiLvl.get(k) - ph) <= eqTol * pipSize
+                lvl = math.max(hiLvl.get(k), ph)
+                hiLvl.set(k, lvl)
+                hiCnt.set(k, hiCnt.get(k) + 1)
+                ln = hiLn.get(k)
+                line.set_y1(ln, lvl)
+                line.set_y2(ln, lvl)
+                line.set_style(ln, line.style_solid)
+                line.set_color(ln, color.new(color.red, 20))
+                merged := true
+                break
+    if not merged
+        hiLvl.push(ph)
+        hiCnt.push(1)
+        hiLn.push(showLiq ? line.new(bar_index - pvLen, ph, bar_index, ph, color = color.new(color.red, 60), style = line.style_dotted, extend = extend.right) : na)
+        if hiLvl.size() > 12
+            hiLvl.shift()
+            hiCnt.shift()
+            line.delete(hiLn.shift())
+
+// ───── Sweep-et ─────
+var float pBuyLvl  = na    // niveli poshte qe u mor, pret mbylljen mbi te
+var float pBuyLow  = na    // bishti me i ulet i sweep-it
+var int   pBuyExp  = na
+var float pSellLvl = na
+var float pSellHi  = na
+var int   pSellExp = na
+
+if not na(pBuyExp) and bar_index > pBuyExp
+    pBuyLvl := na
+    pBuyLow := na
+    pBuyExp := na
+if not na(pSellExp) and bar_index > pSellExp
+    pSellLvl := na
+    pSellHi  := na
+    pSellExp := na
+
+if loLvl.size() > 0
+    for k = loLvl.size() - 1 to 0
+        lvl = loLvl.get(k)
+        if low < lvl
+            if loCnt.get(k) >= needCnt and lvl - low <= maxSweep * pipSize
+                pBuyLvl := na(pBuyLvl) ? lvl : math.min(pBuyLvl, lvl)
+                pBuyLow := na(pBuyLow) ? low : math.min(pBuyLow, low)
+                pBuyExp := bar_index + confBars
+            ln = loLn.get(k)
+            line.set_extend(ln, extend.none)
+            line.set_x2(ln, bar_index)
+            loLvl.remove(k)
+            loCnt.remove(k)
+            loLn.remove(k)
+
+if hiLvl.size() > 0
+    for k = hiLvl.size() - 1 to 0
+        lvl = hiLvl.get(k)
+        if high > lvl
+            if hiCnt.get(k) >= needCnt and high - lvl <= maxSweep * pipSize
+                pSellLvl := na(pSellLvl) ? lvl : math.max(pSellLvl, lvl)
+                pSellHi  := na(pSellHi) ? high : math.max(pSellHi, high)
+                pSellExp := bar_index + confBars
+            ln = hiLn.get(k)
+            line.set_extend(ln, extend.none)
+            line.set_x2(ln, bar_index)
+            hiLvl.remove(k)
+            hiCnt.remove(k)
+            hiLn.remove(k)
+
+// Nese cmimi vazhdon shume pertej nivelit, nuk eshte me sweep por thyerje
+if not na(pBuyLvl)
+    pBuyLow := math.min(pBuyLow, low)
+    if pBuyLvl - pBuyLow > maxSweep * pipSize
+        pBuyLvl := na
+        pBuyLow := na
+        pBuyExp := na
+if not na(pSellLvl)
+    pSellHi := math.max(pSellHi, high)
+    if pSellHi - pSellLvl > maxSweep * pipSize
+        pSellLvl := na
+        pSellHi  := na
+        pSellExp := na
+
+// Sinjali: mbyllje perseri mbrapa nivelit qe u mor
+buySig  = not na(pBuyLvl)  and close > pBuyLvl  and (not needBody or close > open) and buyOk
+sellSig = not na(pSellLvl) and close < pSellLvl and (not needBody or close < open) and sellOk
+float sigBuyLow = pBuyLow
+float sigSellHi = pSellHi
+if buySig
+    pBuyLvl := na
+    pBuyLow := na
+    pBuyExp := na
+if sellSig
+    pSellLvl := na
+    pSellHi  := na
+    pSellExp := na
+
+// ───── Simulimi i trade-ve ─────
+var int   dir       = 0
+var float entry     = na
+var float sl        = na
+var float tp1       = na
+var float tp2       = na
+var float riskPips  = na
+var float bestPx    = na
+var bool  tp1Hit    = false
+var float setupPips = 0.0
+var int   entryBar  = na
+
+var int   setups    = 0
+var int   wins      = 0
+var int   losses    = 0
+var float totalPips = 0.0
+
+bool closedNow = false
+
+// Daljet. Nese SL dhe TP preken ne te njejtin qiri, llogaritet SL (rasti me i keq).
+if dir != 0 and bar_index > entryBar
+    hitSL  = dir == 1 ? low <= sl : high >= sl
+    hitTP1 = dir == 1 ? high >= tp1 : low <= tp1
+    hitTP2 = dir == 1 ? high >= tp2 : low <= tp2
+    if not tp1Hit
+        if hitSL
+            setupPips += 2 * dir * (sl - entry) / pipSize
+            closedNow := true
+        else if hitTP1
+            tp1Hit := true
+            setupPips += dir * (tp1 - entry) / pipSize
+            if hitTP2
+                setupPips += dir * (tp2 - entry) / pipSize
+                closedNow := true
+            else if useBE
+                sl := entry + dir * beOffset * pipSize
+    else
+        if hitSL
+            setupPips += dir * (sl - entry) / pipSize
+            closedNow := true
+        else if hitTP2
+            setupPips += dir * (tp2 - entry) / pipSize
+            closedNow := true
+    // Trailing: SL ndjek cmimin pas TP1 dhe leviz vetem ne favor
+    if not closedNow and tp1Hit and useTrail
+        bestPx := dir == 1 ? math.max(bestPx, high) : math.min(bestPx, low)
+        newSL = bestPx - dir * trailPip * pipSize
+        if dir * (newSL - sl) > 0
+            sl := newSL
+
+if closedNow
+    totalPips += setupPips
+    if setupPips > 0
+        wins += 1
+    else
+        losses += 1
+    label.new(bar_index, dir == 1 ? high : low, (setupPips > 0 ? "+" : "") + str.tostring(setupPips, "#") + " pips",
+         style = dir == 1 ? label.style_label_down : label.style_label_up,
+         color = setupPips > 0 ? color.new(color.green, 10) : color.new(color.red, 10),
+         textcolor = color.white, size = size.small)
+    dir    := 0
+    tp1Hit := false
+
+// Hyrja ne mbylljen e qiririt qe u kthye mbrapa nivelit
+inSess = not useSess or not na(time(timeframe.period, sess))
+if dir == 0 and barstate.isconfirmed and inSess and buySig != sellSig
+    d     = buySig ? 1 : -1
+    slPx  = d == 1 ? sigBuyLow - slBuf * pipSize : sigSellHi + slBuf * pipSize
+    risk  = math.max(minSL, d * (close - slPx) / pipSize)
+    // TP2 = niveli me i afert i likuiditetit ne anen tjeter qe jep te pakten minRR
+    minTP = close + d * minRR * risk * pipSize
+    float target = na
+    lv = d == 1 ? hiLvl : loLvl
+    if lv.size() > 0
+        for k = 0 to lv.size() - 1
+            t = lv.get(k) - d * tpBuf * pipSize
+            if d * (t - minTP) >= 0 and (na(target) or d * (t - target) < 0)
+                target := t
+    hasLiq = not na(target)
+    if not hasLiq
+        target := close + d * fbRR * risk * pipSize
+    if risk <= maxSL
+        dir       := d
+        entry     := close
+        riskPips  := risk
+        sl        := entry - dir * risk * pipSize
+        tp2       := target
+        tp1       := entry + dir * math.min(tp1R * risk, 0.5 * dir * (target - entry) / pipSize) * pipSize
+        bestPx    := entry
+        tp1Hit    := false
+        setupPips := 0.0
+        entryBar  := bar_index
+        setups    += 1
+        rr = dir * (tp2 - entry) / pipSize / risk
+        label.new(bar_index, 0, (dir == 1 ? "BUY" : "SELL") + " SWEEP\nRR " + str.tostring(rr, "#.#") + (hasLiq ? "" : " *"),
+             yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
+             style = dir == 1 ? label.style_label_up : label.style_label_down,
+             color = dir == 1 ? color.new(color.green, 0) : color.new(color.red, 0),
+             textcolor = color.white, size = size.small)
+
+enteredLong  = dir == 1  and entryBar == bar_index
+enteredShort = dir == -1 and entryBar == bar_index
+
+// ───── Grafiku: hyrja, SL (qe ndjek cmimin), TP1, TP2 ─────
+plot(dir != 0 ? entry : na, "Hyrja", color = color.gray, style = plot.style_linebr)
+plot(dir != 0 ? sl    : na, "SL",    color = color.red, style = plot.style_linebr, linewidth = 2)
+plot(dir != 0 ? tp1   : na, "TP1",   color = color.teal, style = plot.style_linebr)
+plot(dir != 0 ? tp2   : na, "TP2",   color = color.green, style = plot.style_linebr, linewidth = 2)
+
+alertcondition(enteredLong,  "LRXAU Buy",  "Liquidity Reversal XAU: BUY pas sweep-it")
+alertcondition(enteredShort, "LRXAU Sell", "Liquidity Reversal XAU: SELL pas sweep-it")
+
+// ───── Tabela e rezultateve ─────
+var table stats = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    usdPerPip = pipSize * 100 * lotSize   // 1 lot ar = 100 ons
+    closed    = wins + losses
+    winRate   = closed > 0 ? 100.0 * wins / closed : 0.0
+    netPips   = totalPips - setups * 2 * spread
+    txt       = color.white
+    table.cell(stats, 0, 0, "Liquidity Reversal", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 0, dir == 1 ? "BUY i hapur" : dir == -1 ? "SELL i hapur" : "Pret sweep", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 1, "Hyrje", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 1, str.tostring(setups), text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 2, "Fitues / Humbes", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 2, str.tostring(wins) + " / " + str.tostring(losses), text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 3, "Win rate", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 3, str.tostring(winRate, "#.#") + " %", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 4, "Pips bruto", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(totalPips, "#"), text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 5, "Pips neto (pas spread)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 5, str.tostring(netPips, "#"), text_color = netPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 6, "Fitimi neto (" + str.tostring(lotSize) + " lot x2)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 6, str.tostring(netPips * usdPerPip, "#.##") + " $", text_color = netPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 7, "Pips mesatare / hyrje", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 7, setups > 0 ? str.tostring(netPips / setups, "#.#") : "-", text_color = txt, text_size = size.small)

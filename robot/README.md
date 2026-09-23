@@ -98,3 +98,15 @@ ndjek trendin, hap dy pozicione në të njëjtin nivel (TP1 i shpejtë dhe TP2 q
 SL vendoset **pas bishtit ose pas OB-së + 5 pips**, minimum 15 dhe maksimum 40 pips. Nëse del më i madh, hyrja anulohet.
 TP1 = 20 pips, TP2 = 50 pips, dhe pas TP1 SL-ja kalon te hyrja (break-even).
 Në grafik, etiketa **BUY LIQ / BUY OB / SELL LIQ+OB** tregon pse hyri, dhe ✕ tregon ku u mor likuiditeti.
+
+## Liquidity Reversal (5m): hyrje pas marrjes së likuiditetit në range
+
+`LiquidityReversalXAU.pine` ndërton hyrjen e tipit BUY 4277.75 të 23.09 (cTrader, m5):
+
+1. Gjen **fundet/majat e barabarta** (equal lows/highs): aty rrinë stop-et, pra likuiditeti.
+2. Pret që çmimi t'i **kalojë me bisht** (sweep), por jo më shumë se 40 pips.
+3. Kur brenda 2 qirinjve **mbyllet përsëri mbrapa nivelit** → hyn në anën e kundërt.
+4. **SL** pas bishtit + 5 pips, **TP1 = 1R**, **TP2 = likuiditeti më i afërt në anën tjetër** (vetëm nëse jep të paktën RR 1.5).
+5. Pas TP1: break-even dhe **trailing SL**, që ngjit SL-në mbi hyrje.
+
+Tabela tregon edhe **pips neto pas spread-it** (2 pips për pozicion, i ndryshueshëm), që rezultati të jetë realist.
