@@ -14,7 +14,7 @@ fastLen = input.int(21, "Fast EMA", minval = 1, group = grpT)
 slowLen = input.int(50, "Slow EMA", minval = 2, group = grpT)
 baseLen = input.int(200, "Trend EMA", minval = 10, group = grpT)
 useHtf  = input.bool(true, "Higher-timeframe filter", group = grpT)
-htfTf   = input.timeframe("15", "HTF timeframe", group = grpT)
+htfTf   = input.timeframe("60", "HTF timeframe", group = grpT)
 htfLen  = input.int(50, "HTF EMA", minval = 1, group = grpT)
 
 grpQ = "Signal quality"
@@ -34,16 +34,16 @@ riskPct  = input.float(1.0, "Risk per trade, % of equity", minval = 0.01, step =
 qtyStep  = input.float(0.01, "Quantity step (lot/contract increment)", minval = 0.00000001, group = grpR)
 atrLen   = input.int(14, "ATR length", minval = 1, group = grpR)
 swingLen = input.int(5, "Swing lookback for SL (bars)", minval = 1, group = grpR)
-slBuffer = input.float(0.3, "SL buffer (ATR ×)", minval = 0, step = 0.1, group = grpR)
+slBuffer = input.float(0.8, "SL buffer (ATR ×)", minval = 0, step = 0.1, group = grpR)
 minSlAtr = input.float(0.5, "Min SL distance (ATR ×)", minval = 0.1, step = 0.1, group = grpR)
 maxSlAtr = input.float(3.0, "Max SL distance (ATR ×) — skip if wider", minval = 0.5, step = 0.1, group = grpR)
 tp1R     = input.float(1.0, "TP1 (R multiple, 50% close)", minval = 0.25, step = 0.25, group = grpR)
-tp2R     = input.float(2.0, "TP2 (R multiple)", minval = 0.5, step = 0.25, group = grpR)
+tp2R     = input.float(3.0, "TP2 (R multiple)", minval = 0.5, step = 0.25, group = grpR)
 moveBE   = input.bool(true, "Move SL to breakeven after TP1", group = grpR)
 
 grpS = "Session"
 useSession = input.bool(true, "Only signal inside session", group = grpS)
-sessionStr = input.session("0700-2000", "Session", group = grpS)
+sessionStr = input.session("1200-2000", "Session", group = grpS)
 sessionTz  = input.string("UTC", "Session timezone", group = grpS)
 
 grpV = "Display"
