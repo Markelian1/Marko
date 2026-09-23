@@ -64,3 +64,18 @@ Each idea below is a change to how the strategy trades, not a parameter tweak. A
 With the H4 filter, the nearby settings still give PF 1.21–1.46: ADX 15/25, TP2 2.5/4, session ±1h and cooldown 5/20.
 Session 16–23 and cooldown 20 looked even better, but they were **not** adopted, to avoid tuning to this sample.
 On the 5m chart the edge disappears (2025 PF 0.96), so keep using 15m.
+
+## Session strategies research (`sess.py`, `research.py`, `asia.py`)
+
+The goal was more trades per day by adding a strategy for each session.
+A strategy is judged by how its whole parameter neighbourhood does, not by the best single combination.
+
+| Idea | Trades/day | Neighbourhood result | Verdict |
+|---|---|---|---|
+| Asia mean reversion (M5 Bollinger fade, RSI, ADX<25) | ~0.3 | 324 combos, median PF 0.96, only 9% have PF≥1.1 in both years | Rejected: the best combos were luck |
+| London breakout of the Asian range (M5) | ~0.3 | 72 combos, median PF 1.02 in 2025 vs 1.92 in 2026 | Regime-dependent: no edge in 2025 |
+| NY opening-range breakout | 0.5–1.5 | PF 1.00–1.14, 2026 ≈ 1.0 | Rejected |
+| TrendEA Pro split by session (M15, all day) | — | Asia PF 0.96, London 0.74, **NY 1.79** | Keep NY only |
+
+Conclusion: on XAUUSD, only the NY trend-pullback has a robust edge in this data.
+To get more trades, run the same EA on more symbols rather than loosening its filters on gold.
