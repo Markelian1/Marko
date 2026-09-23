@@ -1,3 +1,13 @@
+# LimitLevelXAU: urdhra LIMIT te majat dhe fundet e H1 (MT5)
+
+`LimitLevelXAU.mq5` ndjek hyrjet manuale të 23.09 (SELL LIMIT 4377.47 mbi majat e H1, BUY / BUY LIMIT pas rënies):
+
+1. **Nivelet:** majat dhe fundet në **H1** (5 ditët e fundit) që çmimi **ende nuk i ka kaluar**, + High/Low e ditës së kaluar.
+2. **SELL LIMIT 10 pips mbi majën** më të afërt dhe **BUY LIMIT 10 pips nën fundin** më të afërt (30–300 pips larg çmimit).
+   Urdhri vendoset **para se çmimi të arrijë**: kur çmimi merr likuiditetin mbi majë / nën fund, hyrja mbushet.
+3. **SL 35 pips**, **TP 3R (105 pips)**. Kur fitimi arrin 1R, SL kalon te hyrja.
+4. Çdo nivel tregtohet një herë në ditë, maks. **3 hyrje në ditë**, urdhrat vendosen vetëm **09:00–21:00**.
+
 # KeyLevelXAU: robot që hyn vetëm te nivelet kyçe (MT5)
 
 `KeyLevelXAU.mq5` tregton si hyrjet manuale: **SELL te rezistenca, BUY te mbështetja**, vetëm kur plotësohen të gjitha kushtet.
