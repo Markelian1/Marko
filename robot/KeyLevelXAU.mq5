@@ -15,7 +15,7 @@
 //|  Lot fiks, PA martingale.                                         |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "1.00"
+#property version   "1.10"
 #property description "Hyrje vetem te nivelet kyce pas reagimit te konfirmuar. 1 ose 2 pozicione, pa martingale."
 
 #include <Trade\Trade.mqh>
@@ -39,6 +39,10 @@ input int    InpMaxSweepPips    = 40;     // Me thelle se kaq pertej nivelit = n
 input int    InpConfirmBars     = 15;     // Brenda sa qirinjve pas prekjes duhet konfirmimi
 input int    InpMssBars         = 3;      // Konfirmimi: mbyllje pertej min/max te kaq qirinjve
 input bool   InpNeedBody        = true;   // Qiriri i konfirmimit ne drejtim te tregtimit
+input bool   InpNeedSweep       = true;   // Hyr vetem nese cmimi e kaloi nivelin me bisht (sweep)
+input bool   InpUseTrendFilter  = true;   // BUY vetem mbi EMA te H1, SELL vetem nen te
+input ENUM_TIMEFRAMES InpTrendTF = PERIOD_H1;
+input int    InpTrendEMA        = 50;     // EMA e filtrit te trendit
 
 input group "SL / TP"
 input int    InpSLBufPips       = 5;      // SL pas bishtit (pips)
@@ -49,6 +53,8 @@ input double InpFallbackRR      = 2.0;    // TP kur nuk ka nivel tjeter (ne R)
 input int    InpTPBufPips       = 3;      // TP pak para nivelit tjeter
 input double InpTwoPosRR        = 3.0;    // 2 pozicione vetem kur objektivi >= kaq R
 input double InpTP1R            = 1.0;    // TP1 i pozicionit te pare (ne R)
+input double InpMaxRR           = 4.0;    // TP2 jo me larg se kaq R (0 = pa kufi)
+input int    InpTrailPips       = 30;     // Pas TP1: SL ndjek cmimin me kaq pips (0 = vetem break-even)
 input bool   InpSellSpreadAdj   = true;   // SELL: SL/TP zhvendosen me spread-in (mbyllen kur Bid, cmimi ne grafik, i prek)
 input bool   InpBreakEven       = true;   // Pas TP1, SL e pozicionit 2 ne hyrje
 input int    InpBEOffsetPips    = 1;
@@ -71,6 +77,7 @@ struct Watch
 };
 
 CTrade   trade;
+int      hTrendEMA = INVALID_HANDLE;
 double   g_levels[];
 double   g_used[];          // nivelet e perdorura/thyera sot
 int      g_usedDay      = -1;
@@ -92,6 +99,16 @@ int OnInit()
    for(int i = 0; i < 2; i++)
       g_watch[i].active = false;
 
+   if(InpUseTrendFilter)
+   {
+      hTrendEMA = iMA(_Symbol, InpTrendTF, InpTrendEMA, 0, MODE_EMA, PRICE_CLOSE);
+      if(hTrendEMA == INVALID_HANDLE)
+      {
+         Print("Nuk u krijua EMA e trendit");
+         return INIT_FAILED;
+      }
+   }
+
    trade.SetExpertMagicNumber(InpMagic);
    trade.SetDeviationInPoints(30);
    trade.SetTypeFillingBySymbol(_Symbol);
@@ -102,6 +119,7 @@ int OnInit()
 void OnDeinit(const int reason)
 {
    ObjectsDeleteAll(0, "KL_");
+   if(hTrendEMA != INVALID_HANDLE) IndicatorRelease(hTrendEMA);
    PrintStats();
 }
 
@@ -131,6 +149,7 @@ void OnTick()
    if(sig == 0) return;
 
    if(CountMyPositions() > 0) return;
+   if(InpUseTrendFilter && TrendDir() != sig) return;   // kunder trendit te H1
    if(!IsTradingHour())       return;
    if(!IsSpreadOk())          return;
    if(!AreDailyLimitsOk())    return;
@@ -281,8 +300,10 @@ int UpdateWatches()
       }
 
       // Konfirmimi: mbyllje mbrapa nivelit dhe pertej struktures se vogel
+      bool swept     = d < 0 ? g_watch[s].extreme > L : g_watch[s].extreme < L;
       bool confirmed = d < 0 ? (c < L && c < LowestLow(2, InpMssBars)   && (!InpNeedBody || c < o))
                              : (c > L && c > HighestHigh(2, InpMssBars) && (!InpNeedBody || c > o));
+      confirmed = confirmed && (!InpNeedSweep || swept);
       if(confirmed)
       {
          g_watch[s].active = false;
@@ -298,6 +319,18 @@ int UpdateWatches()
       }
    }
    return result == 2 ? 0 : result;
+}
+
+//+------------------------------------------------------------------+
+//| 1 = mbi EMA te trendit (vetem BUY), -1 = nen te (vetem SELL)      |
+//+------------------------------------------------------------------+
+int TrendDir()
+{
+   double ema[1];
+   if(CopyBuffer(hTrendEMA, 0, 1, 1, ema) != 1) return 0;
+   double c = iClose(_Symbol, InpTrendTF, 1);
+   if(c == 0) return 0;
+   return c > ema[0] ? 1 : -1;
 }
 
 //+------------------------------------------------------------------+
@@ -369,6 +402,10 @@ void OpenTrade(const int dir, const double extreme)
    else
       target = price + dir * InpFallbackRR * risk * pip;
 
+   // TP2 shume larg rrallehere arrihet: kufizohet ne InpMaxRR
+   if(InpMaxRR > 0 && dir * (target - price) / pip > InpMaxRR * risk)
+      target = price + dir * InpMaxRR * risk * pip;
+
    double rr   = dir * (target - price) / pip / risk;
    double lots = NormalizeLots(InpLots);
    // SELL mbyllet me cmimin Ask, ndersa grafiku tregon Bid. Pa kete, TP mund te preket ne grafik
@@ -421,19 +458,24 @@ void ManageBreakEven()
       double sl   = PositionGetDouble(POSITION_SL);
       double tp   = PositionGetDouble(POSITION_TP);
 
+      // Break-even, dhe me InpTrailPips > 0 SL ndjek cmimin (leviz vetem ne favor, me hapa >= 1 pip)
       if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY)
       {
-         double newSL = NormalizeDouble(open + InpBEOffsetPips * pip, _Digits);
          double bid   = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-         if(sl < newSL && bid - newSL > minStop)
+         double newSL = open + InpBEOffsetPips * pip;
+         if(InpTrailPips > 0) newSL = MathMax(newSL, bid - InpTrailPips * pip);
+         newSL = NormalizeDouble(newSL, _Digits);
+         if(newSL - sl >= pip && bid - newSL > minStop)
             if(!trade.PositionModify(ticket, newSL, tp))
                Print("Break-even deshtoi: ", trade.ResultRetcodeDescription());
       }
       else
       {
-         double newSL = NormalizeDouble(open - InpBEOffsetPips * pip, _Digits);
          double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-         if((sl == 0 || sl > newSL) && newSL - ask > minStop)
+         double newSL = open - InpBEOffsetPips * pip;
+         if(InpTrailPips > 0) newSL = MathMin(newSL, ask + InpTrailPips * pip);
+         newSL = NormalizeDouble(newSL, _Digits);
+         if((sl == 0 || sl - newSL >= pip) && newSL - ask > minStop)
             if(!trade.PositionModify(ticket, newSL, tp))
                Print("Break-even deshtoi: ", trade.ResultRetcodeDescription());
       }

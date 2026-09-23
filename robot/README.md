@@ -9,6 +9,12 @@
 5. **1 ose 2 pozicione:** nëse objektivi është ≥ 3R hap 2 (TP1 = 1R, TP2 = niveli tjetër, pastaj break-even), përndryshe 1.
 6. Çdo nivel përdoret **një herë në ditë**, maksimumi **4 hyrje në ditë**, vetëm **09:00–21:00** (London + New York).
 
+**Përmirësimet e versionit 1.10** (secili mund të fiket te Inputs):
+- **Vetëm pas sweep-it** (`InpNeedSweep`): çmimi duhet ta kalojë nivelin me bisht, jo vetëm ta afrojë.
+- **Filtri i trendit H1** (`InpUseTrendFilter`): BUY vetëm kur H1 mbyllet mbi EMA 50, SELL vetëm nën të.
+- **TP2 maksimumi 4R** (`InpMaxRR`): objektivat shumë larg rrallë arrihen.
+- **Trailing 30 pips pas TP1** (`InpTrailPips`): SL e pozicionit 2 ndjek çmimin, jo vetëm break-even.
+
 Në fund të testit, tab-i **Journal** tregon hyrjet, fituesit dhe fitimin neto për BUY dhe SELL.
 
 # TrendScalperXAU: robot për arin (MT5)
