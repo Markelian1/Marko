@@ -156,6 +156,76 @@ void OnDeinit(const int reason)
       if(hSlow[i] != INVALID_HANDLE) IndicatorRelease(hSlow[i]);
    }
    if(hEntryEMA != INVALID_HANDLE) IndicatorRelease(hEntryEMA);
+   PrintStatsByType();
+}
+
+//+------------------------------------------------------------------+
+//| Ne fund (edhe ne Strategy Tester): rezultati per cdo lloj hyrjeje |
+//| sipas komentit te pozicionit. Shfaqet te tab-i Journal.           |
+//+------------------------------------------------------------------+
+void PrintStatsByType()
+{
+   if(!HistorySelect(0, TimeCurrent() + 60))
+      return;
+
+   string types[4] = {"SWEEP", "RETEST", "TREND", "KTHIM"};
+   int    cnt[4];
+   int    won[4];
+   double net[4];
+   ArrayInitialize(cnt, 0);
+   ArrayInitialize(won, 0);
+   ArrayInitialize(net, 0.0);
+
+   long   posIds[];
+   int    posType[];
+   int    nPos  = 0;
+   int    total = HistoryDealsTotal();
+
+   for(int i = 0; i < total; i++)
+   {
+      ulong deal = HistoryDealGetTicket(i);
+      if(deal == 0) continue;
+      if(HistoryDealGetString(deal, DEAL_SYMBOL) != _Symbol) continue;
+      if(HistoryDealGetInteger(deal, DEAL_MAGIC) != (long)InpMagic) continue;
+
+      long   posId = HistoryDealGetInteger(deal, DEAL_POSITION_ID);
+      long   entry = HistoryDealGetInteger(deal, DEAL_ENTRY);
+      double pl    = HistoryDealGetDouble(deal, DEAL_PROFIT)
+                   + HistoryDealGetDouble(deal, DEAL_COMMISSION)
+                   + HistoryDealGetDouble(deal, DEAL_SWAP);
+
+      if(entry == DEAL_ENTRY_IN)
+      {
+         string cmt = HistoryDealGetString(deal, DEAL_COMMENT);
+         int t = -1;
+         for(int k = 0; k < 4; k++)
+            if(StringFind(cmt, types[k]) == 0) { t = k; break; }
+         ArrayResize(posIds, nPos + 1, 1000);
+         ArrayResize(posType, nPos + 1, 1000);
+         posIds[nPos]  = posId;
+         posType[nPos] = t;
+         nPos++;
+         if(t >= 0) net[t] += pl;
+         continue;
+      }
+
+      // Dalja: gjej llojin e hyrjes (kerkim nga fundi, pozicionet mbyllen shpejt)
+      int t = -1;
+      for(int k = nPos - 1; k >= 0; k--)
+         if(posIds[k] == posId) { t = posType[k]; break; }
+      if(t < 0) continue;
+      cnt[t]++;
+      if(pl > 0) won[t]++;
+      net[t] += pl;
+   }
+
+   Print("===== Rezultati sipas llojit te hyrjes (", _Symbol, ") =====");
+   for(int k = 0; k < 4; k++)
+   {
+      double wr = cnt[k] > 0 ? 100.0 * won[k] / cnt[k] : 0.0;
+      PrintFormat("%-6s : %5d pozicione | fitues %5.1f%% | neto %10.2f | mesatarja %6.2f",
+                  types[k], cnt[k], wr, net[k], cnt[k] > 0 ? net[k] / cnt[k] : 0.0);
+   }
 }
 
 //+------------------------------------------------------------------+
