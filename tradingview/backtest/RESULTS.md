@@ -79,3 +79,20 @@ A strategy is judged by how its whole parameter neighbourhood does, not by the b
 
 Conclusion: on XAUUSD, only the NY trend-pullback has a robust edge in this data.
 To get more trades, run the same EA on more symbols rather than loosening its filters on gold.
+
+## Re-test on the FP Trading broker feed (M5 2025-04-28 → 2026-09-23, M1 2026-06-15 → 2026-09-23)
+
+Prices match the first dataset (median difference $0.08), but the real spread is about **4× wider** (20 points, i.e. $0.20, instead of 5).
+
+| Variant | Trades | PF | Net R | Max DD (R) | 2025 PF | 2026 PF |
+|---|---|---|---|---|---|---|
+| v2.0 (H1 filter only) | 154 | 1.27 | 19.3 | 10.9 | 1.76 | 1.03 |
+| **v2.1 (H1 + H4), M15** | 133 | **1.35** | **21.1** | **6.8** | 1.75 | 1.13 |
+| v2.1 on M5 | 201 | 1.05 | 4.6 | 16.1 | 0.87 | 1.26 |
+| v2.1 on all sessions | 269 | 1.11 | 14.7 | 11.1 | 1.34 | 0.94 |
+| v2.1 on M1, NY session (Jun–Sep) | 162 | 1.02 | 1.4 | 12.6 | — | — |
+| v2.1 on M1, all sessions (Jun–Sep) | 451 | 0.92 | -20.6 | 33.9 | — | — |
+
+- v2.1 on M15 is positive in **every quarter** (PF 1.04–2.11). Every nearby setting is positive in both years.
+- The M1 exit check re-played the Jun–Sep 2026 trades on 1-minute bars. The net R was the same (5.61R vs 5.60R) and only one trade had a different outcome, so the M15 bar model is accurate.
+- Faster timeframes and more sessions add trades, but the edge disappears.
