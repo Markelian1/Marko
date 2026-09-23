@@ -1,6 +1,9 @@
 //@version=6
-// TrendScalperXAU: e njejta logjike si robot/TrendScalperXAU.mq5
-// Trendi: EMA 50 / EMA 200 ne 15m. Hyrja: pullback te EMA 20 (grafik 5m).
+// TrendScalperXAU: trendi nga 3 timeframe (1H, 15m, 5m) qe punojne bashke.
+//   - 5m jep drejtimin e hyrjes, 15m nuk duhet te jete kunder tij.
+//   - Te tre ne te njejtin drejtim = trend i FORTE (TP1 + TP2).
+//   - 5m (dhe 15m) kunder 1H = KTHIM: hyrje ne kthim, vetem TP1 (opsionale).
+// Hyrja: pullback te EMA 20 ne grafik (1m ose 5m).
 // Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips, SL 30 pips, break-even pas TP1.
 indicator("TrendScalperXAU", shorttitle = "TSXAU", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
@@ -13,10 +16,14 @@ slPips   = input.int(30, "SL", minval = 1, group = grpTP)
 useBE    = input.bool(true, "Break-even pas TP1", group = grpTP)
 beOffset = input.int(1, "Break-even + pips", minval = 0, group = grpTP)
 
-grpTrend = "Trendi"
-trendTF  = input.timeframe("15", "Timeframe i trendit", group = grpTrend)
-fastLen  = input.int(50, "EMA e shpejte", minval = 1, group = grpTrend)
-slowLen  = input.int(200, "EMA e ngadalte", minval = 1, group = grpTrend)
+grpTrend = "Trendi (3 timeframe)"
+tfHigh   = input.timeframe("60", "Trendi kryesor", group = grpTrend)
+tfMid    = input.timeframe("15", "Trendi i mesem", group = grpTrend)
+tfLow    = input.timeframe("5",  "Trendi i shpejte", group = grpTrend)
+fastLen  = input.int(21, "EMA e shpejte", minval = 1, group = grpTrend)
+slowLen  = input.int(50, "EMA e ngadalte", minval = 1, group = grpTrend)
+allowK   = input.bool(true, "Lejo hyrje ne kthime (kunder trendit kryesor)", group = grpTrend)
+kTP1Only = input.bool(true, "Ne kthime merr vetem TP1", group = grpTrend, tooltip = "Te dy pozicionet mbyllen ne TP1, sepse kthimi zakonisht eshte i shkurter")
 
 grpEntry = "Hyrja"
 entryLen = input.int(20, "EMA e hyrjes (pullback)", minval = 1, group = grpEntry)
@@ -25,21 +32,30 @@ sess     = input.session("0300-2100", "Orari (ora e burses ne grafik)", group = 
 
 grpView  = "Pamja"
 lotSize  = input.float(0.01, "Loti per pozicion (per llogaritjen ne $)", step = 0.01, group = grpView)
-showEMA  = input.bool(true, "Shfaq EMA-t", group = grpView)
+showEMA  = input.bool(true, "Shfaq EMA-n e hyrjes", group = grpView)
 showBg   = input.bool(true, "Ngjyros sfondin sipas trendit", group = grpView)
 
-// ───── Trendi ne 15m (vetem qirinj te mbyllur, pa repaint) ─────
-htfFast  = request.security(syminfo.tickerid, trendTF, ta.ema(close, fastLen)[1], lookahead = barmerge.lookahead_on)
-htfSlow  = request.security(syminfo.tickerid, trendTF, ta.ema(close, slowLen)[1], lookahead = barmerge.lookahead_on)
-htfClose = request.security(syminfo.tickerid, trendTF, close[1], lookahead = barmerge.lookahead_on)
+// ───── Trendi ne 3 timeframe (vetem qirinj te mbyllur, pa repaint) ─────
+// 1 = lart (EMA e shpejte mbi te ngadalten dhe cmimi mbi EMA e shpejte), -1 = poshte, 0 = pa drejtim
+tfTrend(tf) =>
+    [f, s, c] = request.security(syminfo.tickerid, tf, [ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1], close[1]], lookahead = barmerge.lookahead_on)
+    f > s and c > f ? 1 : f < s and c < f ? -1 : 0
 
-trend = htfFast > htfSlow and htfClose > htfFast ? 1 : htfFast < htfSlow and htfClose < htfFast ? -1 : 0
+tH = tfTrend(tfHigh)
+tM = tfTrend(tfMid)
+tL = tfTrend(tfLow)
+
+// 5m jep drejtimin; 15m nuk duhet te jete kunder tij
+baseDir  = tL != 0 and tM != -tL ? tL : 0
+isKthim  = baseDir != 0 and tH == -baseDir
+isForte  = baseDir != 0 and tH == baseDir and tM == baseDir
+tradeDir = isKthim and not allowK ? 0 : baseDir
 
 // ───── Sinjali i hyrjes ─────
 emaEntry = ta.ema(close, entryLen)
 inSess   = not useSess or not na(time(timeframe.period, sess))
-buySig   = trend == 1  and low  <= emaEntry and close > emaEntry and close > open
-sellSig  = trend == -1 and high >= emaEntry and close < emaEntry and close < open
+buySig   = tradeDir == 1  and low  <= emaEntry and close > emaEntry and close > open
+sellSig  = tradeDir == -1 and high >= emaEntry and close < emaEntry and close < open
 
 // ───── Simulimi i trade-ve ─────
 var int   dir       = 0      // 1 = buy, -1 = sell, 0 = pa pozicion
@@ -47,6 +63,7 @@ var float entry     = na
 var float sl        = na
 var float tp1       = na
 var float tp2       = na
+var bool  tp1Only   = false  // hyrje ne kthim: te dy pozicionet mbyllen ne TP1
 var bool  tp1Hit    = false
 var float setupPips = 0.0
 var int   entryBar  = na
@@ -56,6 +73,7 @@ var line  lnTP1     = na
 var line  lnTP2     = na
 
 var int   setups    = 0
+var int   nKthim    = 0
 var int   wins      = 0
 var int   losses    = 0
 var float totalPips = 0.0
@@ -74,7 +92,10 @@ if dir != 0 and bar_index > entryBar
         else if hitTP1
             tp1Hit := true
             setupPips += tp1Pips
-            if hitTP2
+            if tp1Only
+                setupPips += tp1Pips
+                closedNow := true
+            else if hitTP2
                 setupPips += tp2Pips
                 closedNow := true
             else if useBE
@@ -114,54 +135,70 @@ bool enteredLong  = false
 bool enteredShort = false
 if dir == 0 and barstate.isconfirmed and inSess and (buySig or sellSig)
     dir       := buySig ? 1 : -1
+    tp1Only   := isKthim and kTP1Only
     entry     := close
     sl        := entry - dir * slPips  * pipSize
     tp1       := entry + dir * tp1Pips * pipSize
-    tp2       := entry + dir * tp2Pips * pipSize
+    tp2       := tp1Only ? tp1 : entry + dir * tp2Pips * pipSize
     tp1Hit    := false
     setupPips := 0.0
     entryBar  := bar_index
     setups    += 1
+    nKthim    += isKthim ? 1 : 0
     lnEntry   := line.new(bar_index, entry, bar_index, entry, color = color.gray)
     lnSL      := line.new(bar_index, sl,    bar_index, sl,    color = color.red, width = 2)
     lnTP1     := line.new(bar_index, tp1,   bar_index, tp1,   color = color.teal, style = line.style_dashed)
     lnTP2     := line.new(bar_index, tp2,   bar_index, tp2,   color = color.green, width = 2)
+    tag = isForte ? " 3/3" : isKthim ? " KTHIM" : ""
+    label.new(bar_index, 0, (dir == 1 ? "BUY" : "SELL") + tag,
+         yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
+         style = dir == 1 ? label.style_label_up : label.style_label_down,
+         color = isKthim ? (dir == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0)) : (dir == 1 ? color.green : color.red),
+         textcolor = color.white, size = size.small)
     enteredLong  := dir == 1
     enteredShort := dir == -1
 
 // ───── Grafiku ─────
-plot(showEMA ? emaEntry : na, "EMA hyrje",           color = color.orange)
-plot(showEMA ? htfFast  : na, "EMA trend e shpejte", color = color.blue)
-plot(showEMA ? htfSlow  : na, "EMA trend e ngadalte", color = color.purple, linewidth = 2)
-bgcolor(showBg and trend == 1 ? color.new(color.green, 92) : showBg and trend == -1 ? color.new(color.red, 92) : na)
+plot(showEMA ? emaEntry : na, "EMA hyrje", color = color.orange)
 
-plotshape(enteredLong,  "Buy",  shape.labelup,   location.belowbar, color.green, text = "BUY",  textcolor = color.white, size = size.small)
-plotshape(enteredShort, "Sell", shape.labeldown, location.abovebar, color.red,   text = "SELL", textcolor = color.white, size = size.small)
+// Sfondi: i forte kur 3/3 bien dakord, me i lehte ne kthime ose kur 1H eshte neutral
+bgCol = tradeDir == 1  ? color.new(color.green, isForte ? 88 : 95) :
+     tradeDir == -1 ? color.new(color.red, isForte ? 88 : 95) : na
+bgcolor(showBg ? bgCol : na)
 
 alertcondition(enteredLong,  "TSXAU Buy",  "TrendScalperXAU: BUY")
 alertcondition(enteredShort, "TSXAU Sell", "TrendScalperXAU: SELL")
 
 // ───── Tabela e rezultateve ─────
-var table stats = table.new(position.top_right, 2, 8, bgcolor = color.new(color.black, 15), border_width = 1)
+trendTxt(t) => t == 1 ? "LART" : t == -1 ? "POSHTE" : "-"
+trendCol(t) => t == 1 ? color.lime : t == -1 ? color.red : color.gray
+
+var table stats = table.new(position.top_right, 2, 12, bgcolor = color.new(color.black, 15), border_width = 1)
 if barstate.islast
     usdPerPip = pipSize * 100 * lotSize   // 1 lot ar = 100 ons
     closed    = wins + losses
     winRate   = closed > 0 ? 100.0 * wins / closed : 0.0
     txt       = color.white
+    mode      = tradeDir == 0 ? "PRIT" : (tradeDir == 1 ? "BUY" : "SELL") + (isForte ? " 3/3" : isKthim ? " KTHIM" : "")
     table.cell(stats, 0, 0, "TrendScalperXAU", text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 0, trend == 1 ? "Trend LART" : trend == -1 ? "Trend POSHTE" : "Pa trend",
-         text_color = trend == 1 ? color.lime : trend == -1 ? color.red : color.gray, text_size = size.small)
-    table.cell(stats, 0, 1, "Hyrje",           text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 1, str.tostring(setups), text_color = txt, text_size = size.small)
-    table.cell(stats, 0, 2, "Fitues",          text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 2, str.tostring(wins),   text_color = color.lime, text_size = size.small)
-    table.cell(stats, 0, 3, "Humbes",          text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 3, str.tostring(losses), text_color = color.red, text_size = size.small)
-    table.cell(stats, 0, 4, "Win rate",        text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 4, str.tostring(winRate, "#.#") + " %", text_color = txt, text_size = size.small)
-    table.cell(stats, 0, 5, "Pips gjithsej",   text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 5, str.tostring(totalPips, "#.#"), text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
-    table.cell(stats, 0, 6, "Fitimi (" + str.tostring(lotSize) + " lot x2)", text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 6, str.tostring(totalPips * usdPerPip, "#.##") + " $", text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
-    table.cell(stats, 0, 7, "Pozicion i hapur", text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 7, dir == 1 ? "BUY" : dir == -1 ? "SELL" : "-", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 0, mode, text_color = trendCol(tradeDir), text_size = size.small)
+    table.cell(stats, 0, 1, "Trend " + tfHigh, text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 1, trendTxt(tH), text_color = trendCol(tH), text_size = size.small)
+    table.cell(stats, 0, 2, "Trend " + tfMid, text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 2, trendTxt(tM), text_color = trendCol(tM), text_size = size.small)
+    table.cell(stats, 0, 3, "Trend " + tfLow, text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 3, trendTxt(tL), text_color = trendCol(tL), text_size = size.small)
+    table.cell(stats, 0, 4, "Hyrje (kthime)",  text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(setups) + " (" + str.tostring(nKthim) + ")", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 5, "Fitues",          text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 5, str.tostring(wins),   text_color = color.lime, text_size = size.small)
+    table.cell(stats, 0, 6, "Humbes",          text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 6, str.tostring(losses), text_color = color.red, text_size = size.small)
+    table.cell(stats, 0, 7, "Win rate",        text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 7, str.tostring(winRate, "#.#") + " %", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 8, "Pips gjithsej",   text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 8, str.tostring(totalPips, "#.#"), text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 9, "Fitimi (" + str.tostring(lotSize) + " lot x2)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 9, str.tostring(totalPips * usdPerPip, "#.##") + " $", text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 10, "Pozicion i hapur", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 10, dir == 1 ? "BUY" : dir == -1 ? "SELL" : "-", text_color = txt, text_size = size.small)
