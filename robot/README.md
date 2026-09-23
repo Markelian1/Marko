@@ -64,3 +64,23 @@ ndjek trendin, hap dy pozicione në të njëjtin nivel (TP1 i shpejtë dhe TP2 q
 - Ky robot **nuk është kopje** e robotit nga fotot. Kodi i atij roboti nuk dihet; ky ndjek të njëjtën ide.
 - Kodi **nuk është testuar ende** në MT5. Mund të ketë nevojë për rregullime pas kompilimit dhe backtest-it.
 - **Asnjë robot nuk garanton fitim çdo ditë.** Me 0.01 lot, 30–40 € në ditë kërkon rreth 300–400 pips neto, pra shumë hyrje fituese. Në ditë pa trend, ky robot do të hyjë pak ose do të humbasë.
+
+## Indikatori për TradingView (Pine Script)
+
+`TrendScalperXAU.pine` ka të njëjtën logjikë si roboti dhe të tregon në grafik si funksionon:
+
+- **BUY / SELL** në qiririn ku jepet sinjali
+- vijat e **hyrjes (gri)**, **SL (e kuqe)**, **TP1 (e ndërprerë)**, **TP2 (jeshile)**, dhe **break-even (portokalli)** pas TP1
+- etiketa me rezultatin në pips kur mbyllet çdo hyrje
+- sfondi **jeshil** kur trendi është lart dhe **i kuq** kur është poshtë
+- tabela lart djathtas: hyrjet, fituesit, humbësit, win rate, pips gjithsej dhe fitimi në $
+
+**Si ta vendosësh:**
+
+1. Hap TradingView → grafiku **XAUUSD**, timeframe **5 minuta**.
+2. Poshtë hap **Pine Editor**, fshi kodin që është aty dhe ngjit gjithë përmbajtjen e `TrendScalperXAU.pine`.
+3. Kliko **Save**, pastaj **Add to chart**.
+4. Ndrysho TP, SL dhe EMA-t te ⚙️ (Settings) e indikatorit.
+5. Për njoftime: **Alert → Condition: TSXAU → TSXAU Buy / TSXAU Sell**.
+
+> Rezultatet në tabelë janë simulim mbi qirinjtë e grafikut. Nuk përfshijnë spread-in dhe komisionin, dhe kur SL dhe TP preken në të njëjtin qiri llogaritet SL. Në tregtim real rezultati do të jetë pak më i ulët.
