@@ -1,10 +1,12 @@
 //@version=6
-// TrendScalperXAU: trendi nga 3 timeframe (1H, 15m, 5m) qe punojne bashke.
-//   - 5m jep drejtimin e hyrjes, 15m nuk duhet te jete kunder tij.
-//   - Te tre ne te njejtin drejtim = trend i FORTE (TP1 + TP2).
-//   - 5m (dhe 15m) kunder 1H = KTHIM: hyrje ne kthim, vetem TP1 (opsionale).
-// Hyrja: pullback te EMA 20 ne grafik (1m ose 5m).
-// Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips, SL 30 pips, break-even pas TP1.
+// TrendScalperXAU
+// Dy lloje hyrjesh:
+//   1. TREND: pullback te EMA 20 ne drejtim te trendit nga 3 timeframe (1H, 15m, 5m).
+//      Te tre ne te njejtin drejtim = 3/3. 5m kunder 1H = KTHIM (vetem TP1).
+//   2. SWEEP: cmimi merr fundet/majat e barabarta me bisht dhe mbyllet mbrapa nivelit
+//      -> hyrje ne anen e kundert, pavaresisht trendit (p.sh. BUY ne fund te nje renieje).
+//      Sweep-i mbyll edhe pozicionin e kundert nese ka nje te hapur.
+// Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips, break-even pas TP1.
 indicator("TrendScalperXAU", shorttitle = "TSXAU", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
 // ───── Inputet ─────
@@ -12,31 +14,44 @@ grpTP    = "TP / SL (ne pips)"
 pipSize  = input.float(0.10, "1 pip =", step = 0.01, group = grpTP, tooltip = "Ne ar 1 pip = 0.10$ levizje cmimi")
 tp1Pips  = input.int(20, "TP1", minval = 1, group = grpTP)
 tp2Pips  = input.int(50, "TP2", minval = 1, group = grpTP)
-slPips   = input.int(30, "SL", minval = 1, group = grpTP)
+slPips   = input.int(30, "SL per hyrjet TREND", minval = 1, group = grpTP)
 useBE    = input.bool(true, "Break-even pas TP1", group = grpTP)
 beOffset = input.int(1, "Break-even + pips", minval = 0, group = grpTP)
 
-grpTrend = "Trendi (3 timeframe)"
+grpTrend = "Hyrjet TREND (3 timeframe)"
+useTrend = input.bool(true, "Lejo hyrjet TREND", group = grpTrend)
 tfHigh   = input.timeframe("60", "Trendi kryesor", group = grpTrend)
 tfMid    = input.timeframe("15", "Trendi i mesem", group = grpTrend)
 tfLow    = input.timeframe("5",  "Trendi i shpejte", group = grpTrend)
 fastLen  = input.int(21, "EMA e shpejte", minval = 1, group = grpTrend)
 slowLen  = input.int(50, "EMA e ngadalte", minval = 1, group = grpTrend)
 allowK   = input.bool(true, "Lejo hyrje ne kthime (kunder trendit kryesor)", group = grpTrend)
-kTP1Only = input.bool(true, "Ne kthime merr vetem TP1", group = grpTrend, tooltip = "Te dy pozicionet mbyllen ne TP1, sepse kthimi zakonisht eshte i shkurter")
+kTP1Only = input.bool(true, "Ne kthime merr vetem TP1", group = grpTrend)
+entryLen = input.int(20, "EMA e hyrjes (pullback)", minval = 1, group = grpTrend)
 
-grpEntry = "Hyrja"
-entryLen = input.int(20, "EMA e hyrjes (pullback)", minval = 1, group = grpEntry)
-useSess  = input.bool(false, "Vetem brenda orarit", group = grpEntry)
-sess     = input.session("0300-2100", "Orari (ora e burses ne grafik)", group = grpEntry)
+grpLiq   = "Hyrjet SWEEP (likuiditet)"
+useSweep = input.bool(true, "Lejo hyrjet SWEEP", group = grpLiq)
+pvLen    = input.int(3, "Forca e swing-ut (qirinj majtas/djathtas)", minval = 1, maxval = 20, group = grpLiq)
+eqTol    = input.int(15, "Toleranca per fundet/majat e barabarta (pips)", minval = 1, group = grpLiq)
+needEq   = input.bool(true, "Vetem nivele te dyfishta (equal lows / highs)", group = grpLiq)
+maxSweep = input.int(30, "Sweep maksimal pertej nivelit (pips)", minval = 1, group = grpLiq, tooltip = "Nese cmimi shkon me thelle, eshte thyerje e vertete, jo sweep")
+confBars = input.int(2, "Qirinj te lejuar per t'u kthyer mbrapa nivelit", minval = 0, maxval = 10, group = grpLiq)
+needBody = input.bool(true, "Qiriri i hyrjes ne drejtim te tregtimit", group = grpLiq)
+slBuf    = input.int(5, "SL pas bishtit (pips)", minval = 0, group = grpLiq)
+minSL    = input.int(15, "SL minimal (pips)", minval = 1, group = grpLiq)
+maxSL    = input.int(40, "SL maksimal (pips)", minval = 1, group = grpLiq, tooltip = "Nese SL del me i madh, hyrja anulohet")
+flipOpp  = input.bool(true, "Sweep-i mbyll pozicionin e kundert", group = grpLiq)
+showLiq  = input.bool(true, "Shfaq nivelet e likuiditetit", group = grpLiq)
 
-grpView  = "Pamja"
-lotSize  = input.float(0.01, "Loti per pozicion (per llogaritjen ne $)", step = 0.01, group = grpView)
+grpView  = "Pamja / llogaritja"
+useSess  = input.bool(false, "Vetem brenda orarit", group = grpView)
+sess     = input.session("0300-2100", "Orari (ora e burses ne grafik)", group = grpView)
+lotSize  = input.float(0.01, "Loti per pozicion", step = 0.01, group = grpView)
+spread   = input.float(2.0, "Spread + komision per pozicion (pips)", minval = 0, step = 0.5, group = grpView)
 showEMA  = input.bool(true, "Shfaq EMA-n e hyrjes", group = grpView)
 showBg   = input.bool(true, "Ngjyros sfondin sipas trendit", group = grpView)
 
 // ───── Trendi ne 3 timeframe (vetem qirinj te mbyllur, pa repaint) ─────
-// 1 = lart (EMA e shpejte mbi te ngadalten dhe cmimi mbi EMA e shpejte), -1 = poshte, 0 = pa drejtim
 tfTrend(tf) =>
     [f, s, c] = request.security(syminfo.tickerid, tf, [ta.ema(close, fastLen)[1], ta.ema(close, slowLen)[1], close[1]], lookahead = barmerge.lookahead_on)
     f > s and c > f ? 1 : f < s and c < f ? -1 : 0
@@ -45,17 +60,148 @@ tH = tfTrend(tfHigh)
 tM = tfTrend(tfMid)
 tL = tfTrend(tfLow)
 
-// 5m jep drejtimin; 15m nuk duhet te jete kunder tij
 baseDir  = tL != 0 and tM != -tL ? tL : 0
 isKthim  = baseDir != 0 and tH == -baseDir
 isForte  = baseDir != 0 and tH == baseDir and tM == baseDir
 tradeDir = isKthim and not allowK ? 0 : baseDir
 
-// ───── Sinjali i hyrjes ─────
 emaEntry = ta.ema(close, entryLen)
-inSess   = not useSess or not na(time(timeframe.period, sess))
-buySig   = tradeDir == 1  and low  <= emaEntry and close > emaEntry and close > open
-sellSig  = tradeDir == -1 and high >= emaEntry and close < emaEntry and close < open
+buySig   = useTrend and tradeDir == 1  and low  <= emaEntry and close > emaEntry and close > open
+sellSig  = useTrend and tradeDir == -1 and high >= emaEntry and close < emaEntry and close < open
+
+// ───── Nivelet e likuiditetit (fundet / majat e barabarta) ─────
+ph = ta.pivothigh(high, pvLen, pvLen)
+pl = ta.pivotlow(low, pvLen, pvLen)
+needCnt = needEq ? 2 : 1
+
+var array<float> loLvl = array.new<float>()
+var array<int>   loCnt = array.new<int>()
+var array<line>  loLn  = array.new<line>()
+var array<float> hiLvl = array.new<float>()
+var array<int>   hiCnt = array.new<int>()
+var array<line>  hiLn  = array.new<line>()
+
+if not na(pl)
+    merged = false
+    if loLvl.size() > 0
+        for k = 0 to loLvl.size() - 1
+            if math.abs(loLvl.get(k) - pl) <= eqTol * pipSize
+                lvl = math.min(loLvl.get(k), pl)
+                loLvl.set(k, lvl)
+                loCnt.set(k, loCnt.get(k) + 1)
+                ln = loLn.get(k)
+                line.set_y1(ln, lvl)
+                line.set_y2(ln, lvl)
+                line.set_style(ln, line.style_solid)
+                line.set_color(ln, color.new(color.green, 20))
+                merged := true
+                break
+    if not merged
+        loLvl.push(pl)
+        loCnt.push(1)
+        loLn.push(showLiq ? line.new(bar_index - pvLen, pl, bar_index, pl, color = color.new(color.green, 60), style = line.style_dotted, extend = extend.right) : na)
+        if loLvl.size() > 12
+            loLvl.shift()
+            loCnt.shift()
+            line.delete(loLn.shift())
+
+if not na(ph)
+    merged = false
+    if hiLvl.size() > 0
+        for k = 0 to hiLvl.size() - 1
+            if math.abs(hiLvl.get(k) - ph) <= eqTol * pipSize
+                lvl = math.max(hiLvl.get(k), ph)
+                hiLvl.set(k, lvl)
+                hiCnt.set(k, hiCnt.get(k) + 1)
+                ln = hiLn.get(k)
+                line.set_y1(ln, lvl)
+                line.set_y2(ln, lvl)
+                line.set_style(ln, line.style_solid)
+                line.set_color(ln, color.new(color.red, 20))
+                merged := true
+                break
+    if not merged
+        hiLvl.push(ph)
+        hiCnt.push(1)
+        hiLn.push(showLiq ? line.new(bar_index - pvLen, ph, bar_index, ph, color = color.new(color.red, 60), style = line.style_dotted, extend = extend.right) : na)
+        if hiLvl.size() > 12
+            hiLvl.shift()
+            hiCnt.shift()
+            line.delete(hiLn.shift())
+
+// ───── Sweep-et ─────
+var float pBuyLvl  = na
+var float pBuyLow  = na
+var int   pBuyExp  = na
+var float pSellLvl = na
+var float pSellHi  = na
+var int   pSellExp = na
+
+if not na(pBuyExp) and bar_index > pBuyExp
+    pBuyLvl := na
+    pBuyLow := na
+    pBuyExp := na
+if not na(pSellExp) and bar_index > pSellExp
+    pSellLvl := na
+    pSellHi  := na
+    pSellExp := na
+
+if loLvl.size() > 0
+    for k = loLvl.size() - 1 to 0
+        lvl = loLvl.get(k)
+        if low < lvl
+            if loCnt.get(k) >= needCnt and lvl - low <= maxSweep * pipSize
+                pBuyLvl := na(pBuyLvl) ? lvl : math.min(pBuyLvl, lvl)
+                pBuyLow := na(pBuyLow) ? low : math.min(pBuyLow, low)
+                pBuyExp := bar_index + confBars
+            ln = loLn.get(k)
+            line.set_extend(ln, extend.none)
+            line.set_x2(ln, bar_index)
+            loLvl.remove(k)
+            loCnt.remove(k)
+            loLn.remove(k)
+
+if hiLvl.size() > 0
+    for k = hiLvl.size() - 1 to 0
+        lvl = hiLvl.get(k)
+        if high > lvl
+            if hiCnt.get(k) >= needCnt and high - lvl <= maxSweep * pipSize
+                pSellLvl := na(pSellLvl) ? lvl : math.max(pSellLvl, lvl)
+                pSellHi  := na(pSellHi) ? high : math.max(pSellHi, high)
+                pSellExp := bar_index + confBars
+            ln = hiLn.get(k)
+            line.set_extend(ln, extend.none)
+            line.set_x2(ln, bar_index)
+            hiLvl.remove(k)
+            hiCnt.remove(k)
+            hiLn.remove(k)
+
+// Nese cmimi vazhdon shume pertej nivelit, eshte thyerje e vertete, jo sweep
+if not na(pBuyLvl)
+    pBuyLow := math.min(pBuyLow, low)
+    if pBuyLvl - pBuyLow > maxSweep * pipSize
+        pBuyLvl := na
+        pBuyLow := na
+        pBuyExp := na
+if not na(pSellLvl)
+    pSellHi := math.max(pSellHi, high)
+    if pSellHi - pSellLvl > maxSweep * pipSize
+        pSellLvl := na
+        pSellHi  := na
+        pSellExp := na
+
+sweepBuy  = useSweep and not na(pBuyLvl)  and close > pBuyLvl  and (not needBody or close > open)
+sweepSell = useSweep and not na(pSellLvl) and close < pSellLvl and (not needBody or close < open)
+float sigLow  = pBuyLow
+float sigHigh = pSellHi
+if sweepBuy
+    pBuyLvl := na
+    pBuyLow := na
+    pBuyExp := na
+if sweepSell
+    pSellLvl := na
+    pSellHi  := na
+    pSellExp := na
 
 // ───── Simulimi i trade-ve ─────
 var int   dir       = 0      // 1 = buy, -1 = sell, 0 = pa pozicion
@@ -63,7 +209,8 @@ var float entry     = na
 var float sl        = na
 var float tp1       = na
 var float tp2       = na
-var bool  tp1Only   = false  // hyrje ne kthim: te dy pozicionet mbyllen ne TP1
+var float slDist    = na     // SL ne pips per kete hyrje
+var bool  tp1Only   = false
 var bool  tp1Hit    = false
 var float setupPips = 0.0
 var int   entryBar  = na
@@ -74,20 +221,21 @@ var line  lnTP2     = na
 
 var int   setups    = 0
 var int   nKthim    = 0
+var int   nSweep    = 0
 var int   wins      = 0
 var int   losses    = 0
 var float totalPips = 0.0
 
 bool closedNow = false
 
-// Daljet kontrollohen nga qiriri pas hyrjes. Nese SL dhe TP preken ne te njejtin qiri, llogaritet SL (rasti me i keq).
+// Daljet. Nese SL dhe TP preken ne te njejtin qiri, llogaritet SL (rasti me i keq).
 if dir != 0 and bar_index > entryBar
     hitSL  = dir == 1 ? low <= sl : high >= sl
     hitTP1 = dir == 1 ? high >= tp1 : low <= tp1
     hitTP2 = dir == 1 ? high >= tp2 : low <= tp2
     if not tp1Hit
         if hitSL
-            setupPips -= 2 * slPips
+            setupPips -= 2 * slDist
             closedNow := true
         else if hitTP1
             tp1Hit := true
@@ -110,6 +258,11 @@ if dir != 0 and bar_index > entryBar
             setupPips += tp2Pips
             closedNow := true
 
+// Sweep ne anen e kundert: mbyll pozicionin aktual ne mbylljen e qiririt
+if flipOpp and not closedNow and dir != 0 and bar_index > entryBar and barstate.isconfirmed and ((dir == -1 and sweepBuy) or (dir == 1 and sweepSell))
+    setupPips += (tp1Hit ? 1 : 2) * dir * (close - entry) / pipSize
+    closedNow := true
+
 if dir != 0
     line.set_x2(lnEntry, bar_index)
     line.set_x2(lnSL, bar_index)
@@ -122,46 +275,58 @@ if closedNow
         wins += 1
     else
         losses += 1
-    resultText = (setupPips > 0 ? "+" : "") + str.tostring(setupPips, "#.#") + " pips"
-    label.new(bar_index, dir == 1 ? high : low, resultText,
+    label.new(bar_index, dir == 1 ? high : low, (setupPips > 0 ? "+" : "") + str.tostring(setupPips, "#") + " pips",
          style = dir == 1 ? label.style_label_down : label.style_label_up,
          color = setupPips > 0 ? color.new(color.green, 10) : color.new(color.red, 10),
          textcolor = color.white, size = size.small)
     dir    := 0
     tp1Hit := false
 
-// Hyrja: vetem ne qiri te mbyllur dhe kur nuk ka pozicion te hapur
+// Hyrja: SWEEP ka perparesi para TREND
+inSess = not useSess or not na(time(timeframe.period, sess))
 bool enteredLong  = false
 bool enteredShort = false
-if dir == 0 and barstate.isconfirmed and inSess and (buySig or sellSig)
-    dir       := buySig ? 1 : -1
-    tp1Only   := isKthim and kTP1Only
-    entry     := close
-    sl        := entry - dir * slPips  * pipSize
-    tp1       := entry + dir * tp1Pips * pipSize
-    tp2       := tp1Only ? tp1 : entry + dir * tp2Pips * pipSize
-    tp1Hit    := false
-    setupPips := 0.0
-    entryBar  := bar_index
-    setups    += 1
-    nKthim    += isKthim ? 1 : 0
-    lnEntry   := line.new(bar_index, entry, bar_index, entry, color = color.gray)
-    lnSL      := line.new(bar_index, sl,    bar_index, sl,    color = color.red, width = 2)
-    lnTP1     := line.new(bar_index, tp1,   bar_index, tp1,   color = color.teal, style = line.style_dashed)
-    lnTP2     := line.new(bar_index, tp2,   bar_index, tp2,   color = color.green, width = 2)
-    tag = isForte ? " 3/3" : isKthim ? " KTHIM" : ""
-    label.new(bar_index, 0, (dir == 1 ? "BUY" : "SELL") + tag,
-         yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
-         style = dir == 1 ? label.style_label_up : label.style_label_down,
-         color = isKthim ? (dir == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0)) : (dir == 1 ? color.green : color.red),
-         textcolor = color.white, size = size.small)
-    enteredLong  := dir == 1
-    enteredShort := dir == -1
+if dir == 0 and barstate.isconfirmed and inSess
+    d       = 0
+    isSweep = false
+    if sweepBuy != sweepSell
+        d       := sweepBuy ? 1 : -1
+        isSweep := true
+    else if buySig != sellSig
+        d := buySig ? 1 : -1
+    if d != 0
+        slD = isSweep ? math.max(minSL, d * (close - (d == 1 ? sigLow - slBuf * pipSize : sigHigh + slBuf * pipSize)) / pipSize) : slPips
+        if slD <= maxSL or not isSweep
+            k2        = not isSweep and isKthim
+            dir       := d
+            tp1Only   := k2 and kTP1Only
+            entry     := close
+            slDist    := slD
+            sl        := entry - dir * slDist  * pipSize
+            tp1       := entry + dir * tp1Pips * pipSize
+            tp2       := tp1Only ? tp1 : entry + dir * tp2Pips * pipSize
+            tp1Hit    := false
+            setupPips := 0.0
+            entryBar  := bar_index
+            setups    += 1
+            nKthim    += k2 ? 1 : 0
+            nSweep    += isSweep ? 1 : 0
+            lnEntry   := line.new(bar_index, entry, bar_index, entry, color = color.gray)
+            lnSL      := line.new(bar_index, sl,    bar_index, sl,    color = color.red, width = 2)
+            lnTP1     := line.new(bar_index, tp1,   bar_index, tp1,   color = color.teal, style = line.style_dashed)
+            lnTP2     := line.new(bar_index, tp2,   bar_index, tp2,   color = color.green, width = 2)
+            tag = isSweep ? " SWEEP" : isForte ? " 3/3" : k2 ? " KTHIM" : ""
+            label.new(bar_index, 0, (dir == 1 ? "BUY" : "SELL") + tag,
+                 yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
+                 style = dir == 1 ? label.style_label_up : label.style_label_down,
+                 color = isSweep ? (dir == 1 ? color.new(color.blue, 0) : color.new(color.purple, 0)) : k2 ? (dir == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0)) : (dir == 1 ? color.green : color.red),
+                 textcolor = color.white, size = size.small)
+            enteredLong  := dir == 1
+            enteredShort := dir == -1
 
 // ───── Grafiku ─────
 plot(showEMA ? emaEntry : na, "EMA hyrje", color = color.orange)
 
-// Sfondi: i forte kur 3/3 bien dakord, me i lehte ne kthime ose kur 1H eshte neutral
 bgCol = tradeDir == 1  ? color.new(color.green, isForte ? 88 : 95) :
      tradeDir == -1 ? color.new(color.red, isForte ? 88 : 95) : na
 bgcolor(showBg ? bgCol : na)
@@ -173,11 +338,12 @@ alertcondition(enteredShort, "TSXAU Sell", "TrendScalperXAU: SELL")
 trendTxt(t) => t == 1 ? "LART" : t == -1 ? "POSHTE" : "-"
 trendCol(t) => t == 1 ? color.lime : t == -1 ? color.red : color.gray
 
-var table stats = table.new(position.top_right, 2, 12, bgcolor = color.new(color.black, 15), border_width = 1)
+var table stats = table.new(position.top_right, 2, 13, bgcolor = color.new(color.black, 15), border_width = 1)
 if barstate.islast
     usdPerPip = pipSize * 100 * lotSize   // 1 lot ar = 100 ons
     closed    = wins + losses
     winRate   = closed > 0 ? 100.0 * wins / closed : 0.0
+    netPips   = totalPips - setups * 2 * spread
     txt       = color.white
     mode      = tradeDir == 0 ? "PRIT" : (tradeDir == 1 ? "BUY" : "SELL") + (isForte ? " 3/3" : isKthim ? " KTHIM" : "")
     table.cell(stats, 0, 0, "TrendScalperXAU", text_color = txt, text_size = size.small)
@@ -188,17 +354,17 @@ if barstate.islast
     table.cell(stats, 1, 2, trendTxt(tM), text_color = trendCol(tM), text_size = size.small)
     table.cell(stats, 0, 3, "Trend " + tfLow, text_color = txt, text_size = size.small)
     table.cell(stats, 1, 3, trendTxt(tL), text_color = trendCol(tL), text_size = size.small)
-    table.cell(stats, 0, 4, "Hyrje (kthime)",  text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 4, str.tostring(setups) + " (" + str.tostring(nKthim) + ")", text_color = txt, text_size = size.small)
-    table.cell(stats, 0, 5, "Fitues",          text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 5, str.tostring(wins),   text_color = color.lime, text_size = size.small)
-    table.cell(stats, 0, 6, "Humbes",          text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 6, str.tostring(losses), text_color = color.red, text_size = size.small)
-    table.cell(stats, 0, 7, "Win rate",        text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 7, str.tostring(winRate, "#.#") + " %", text_color = txt, text_size = size.small)
-    table.cell(stats, 0, 8, "Pips gjithsej",   text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 8, str.tostring(totalPips, "#.#"), text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
-    table.cell(stats, 0, 9, "Fitimi (" + str.tostring(lotSize) + " lot x2)", text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 9, str.tostring(totalPips * usdPerPip, "#.##") + " $", text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 4, "Hyrje (kthim / sweep)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(setups) + " (" + str.tostring(nKthim) + " / " + str.tostring(nSweep) + ")", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 5, "Fitues / Humbes", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 5, str.tostring(wins) + " / " + str.tostring(losses), text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 6, "Win rate", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 6, str.tostring(winRate, "#.#") + " %", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 7, "Pips bruto", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 7, str.tostring(totalPips, "#"), text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 8, "Pips neto (pas spread)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 8, str.tostring(netPips, "#"), text_color = netPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 9, "Fitimi neto (" + str.tostring(lotSize) + " lot x2)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 9, str.tostring(netPips * usdPerPip, "#.##") + " $", text_color = netPips >= 0 ? color.lime : color.red, text_size = size.small)
     table.cell(stats, 0, 10, "Pozicion i hapur", text_color = txt, text_size = size.small)
     table.cell(stats, 1, 10, dir == 1 ? "BUY" : dir == -1 ? "SELL" : "-", text_color = txt, text_size = size.small)
