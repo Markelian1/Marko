@@ -1,0 +1,245 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+// TrendEA Pro — trend-pullback signals with multi-filter confirmation.
+// Signals only fire when ALL of these agree:
+//   1. EMA stack in trend order (fast > slow > 200 EMA for longs)
+//   2. Higher-timeframe trend in the same direction (non-repainting)
+//   3. ADX shows a real trend and DI+ / DI- agree with the direction
+//   4. Price pulled back to the fast EMA without closing through the slow EMA
+//   5. A confirmation candle closes back in the trend direction, beyond the prior bar
+//   6. RSI has momentum but is not overextended; volatility is not dead; session is open
+// One trade at a time: no new signal until the open one hits SL or TP.
+// SL sits beyond the recent swing (+ATR buffer); TP1 / TP2 are R multiples.
+// A built-in tracker scores every signal so you can see win rate and net R.
+indicator("TrendEA Pro", shorttitle = "TrendEA Pro", overlay = true, max_labels_count = 500, max_lines_count = 500)
+
+// ───── Inputs ─────
+grpT = "Trend"
+fastLen = input.int(21, "Fast EMA", minval = 1, group = grpT)
+slowLen = input.int(50, "Slow EMA", minval = 2, group = grpT)
+baseLen = input.int(200, "Trend EMA", minval = 10, group = grpT)
+useHtf  = input.bool(true, "Higher-timeframe filter", group = grpT)
+htfTf   = input.timeframe("15", "HTF timeframe", group = grpT)
+htfLen  = input.int(50, "HTF EMA", minval = 1, group = grpT)
+
+grpQ = "Signal quality"
+useAdx      = input.bool(true, "ADX trend-strength filter", group = grpQ)
+adxLen      = input.int(14, "ADX length", minval = 1, group = grpQ)
+adxMin      = input.float(20, "Min ADX", group = grpQ)
+rsiLen      = input.int(14, "RSI length", minval = 1, group = grpQ)
+rsiMaxLong  = input.float(70, "Max RSI for longs", group = grpQ)
+rsiMinShort = input.float(30, "Min RSI for shorts", group = grpQ)
+pbLookback  = input.int(5, "Pullback lookback (bars)", minval = 1, group = grpQ)
+useVol      = input.bool(true, "Volatility filter", group = grpQ)
+volRatio    = input.float(0.8, "Min ATR vs its 50-bar average", step = 0.1, group = grpQ)
+cooldown    = input.int(10, "Min bars between signals", minval = 0, group = grpQ)
+
+grpR = "Risk"
+atrLen   = input.int(14, "ATR length", minval = 1, group = grpR)
+swingLen = input.int(5, "Swing lookback for SL (bars)", minval = 1, group = grpR)
+slBuffer = input.float(0.3, "SL buffer (ATR ×)", minval = 0, step = 0.1, group = grpR)
+minSlAtr = input.float(0.5, "Min SL distance (ATR ×)", minval = 0.1, step = 0.1, group = grpR)
+maxSlAtr = input.float(3.0, "Max SL distance (ATR ×) — skip if wider", minval = 0.5, step = 0.1, group = grpR)
+tp1R     = input.float(1.0, "TP1 (R multiple, 50% close)", minval = 0.25, step = 0.25, group = grpR)
+tp2R     = input.float(2.0, "TP2 (R multiple)", minval = 0.5, step = 0.25, group = grpR)
+moveBE   = input.bool(true, "Move SL to breakeven after TP1", group = grpR)
+
+grpS = "Session"
+useSession = input.bool(true, "Only signal inside session", group = grpS)
+sessionStr = input.session("0700-2000", "Session", group = grpS)
+sessionTz  = input.string("UTC", "Session timezone", group = grpS)
+
+grpV = "Display"
+showEmas   = input.bool(true, "Show EMAs", group = grpV)
+showLevels = input.bool(true, "Show Entry / SL / TP lines", group = grpV)
+showStats  = input.bool(true, "Show stats panel", group = grpV)
+statsPos   = input.string("Bottom right", "Panel position", options = ["Top right", "Bottom right", "Bottom left", "Top left"], group = grpV)
+
+// ───── Calculations ─────
+fastEma = ta.ema(close, fastLen)
+slowEma = ta.ema(close, slowLen)
+baseEma = ta.ema(close, baseLen)
+atr     = ta.atr(atrLen)
+atrAvg  = ta.sma(atr, 50)
+rsi     = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+// Non-repainting HTF values: last *closed* HTF bar
+htfClose = request.security(syminfo.tickerid, htfTf, close[1], lookahead = barmerge.lookahead_on)
+htfEma   = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfLen)[1], lookahead = barmerge.lookahead_on)
+htfBull  = not useHtf or htfClose > htfEma
+htfBear  = not useHtf or htfClose < htfEma
+
+inSession = not useSession or not na(time(timeframe.period, sessionStr, sessionTz))
+volOk     = not useVol or atr >= atrAvg * volRatio
+adxOkL    = not useAdx or (adx >= adxMin and diPlus > diMinus)
+adxOkS    = not useAdx or (adx >= adxMin and diMinus > diPlus)
+
+bullStack = fastEma > slowEma and slowEma > baseEma and close > baseEma
+bearStack = fastEma < slowEma and slowEma < baseEma and close < baseEma
+
+lowestLow    = ta.lowest(low, pbLookback)
+highestHigh  = ta.highest(high, pbLookback)
+lowestClose  = ta.lowest(close, pbLookback)
+highestClose = ta.highest(close, pbLookback)
+pullbackL = lowestLow <= fastEma and lowestClose > slowEma
+pullbackS = highestHigh >= fastEma and highestClose < slowEma
+
+triggerL = close > fastEma and close > open and close > high[1]
+triggerS = close < fastEma and close < open and close < low[1]
+
+rsiOkL = rsi > 50 and rsi < rsiMaxLong
+rsiOkS = rsi < 50 and rsi > rsiMinShort
+
+longSetup  = bullStack and htfBull and adxOkL and volOk and inSession and pullbackL and triggerL and rsiOkL
+shortSetup = bearStack and htfBear and adxOkS and volOk and inSession and pullbackS and triggerS and rsiOkS
+
+// Stop loss beyond the recent swing, clamped to [min, max] ATR
+swingLow  = ta.lowest(low, swingLen)
+swingHigh = ta.highest(high, swingLen)
+longSl  = math.min(swingLow - atr * slBuffer, close - atr * minSlAtr)
+shortSl = math.max(swingHigh + atr * slBuffer, close + atr * minSlAtr)
+longRiskOk  = close - longSl  <= atr * maxSlAtr
+shortRiskOk = shortSl - close <= atr * maxSlAtr
+
+// ───── Trade tracking state ─────
+var int   tradeDir  = 0
+var float tEntry    = na
+var float tSl       = na
+var float tTp1      = na
+var float tTp2      = na
+var float tRisk     = na
+var bool  tTp1Hit   = false
+var int   tEntryBar = na
+var int   lastSigBar = na
+
+var int   nTrades   = 0
+var int   nWins     = 0
+var float netR      = 0.0
+var float grossWin  = 0.0
+var float grossLoss = 0.0
+
+var line lnEntry = na
+var line lnSl    = na
+var line lnTp1   = na
+var line lnTp2   = na
+
+// ───── Manage the open trade ─────
+float exitR = na
+if tradeDir != 0 and bar_index > tEntryBar
+    hitSl  = tradeDir == 1 ? low  <= tSl  : high >= tSl
+    hitTp1 = tradeDir == 1 ? high >= tTp1 : low  <= tTp1
+    hitTp2 = tradeDir == 1 ? high >= tTp2 : low  <= tTp2
+    if not tTp1Hit
+        // Stop checked first: if SL and TP print on the same bar, assume the worst
+        if hitSl
+            exitR := -1.0
+        else if hitTp2
+            exitR := 0.5 * tp1R + 0.5 * tp2R
+        else if hitTp1
+            tTp1Hit := true
+            if moveBE
+                tSl := tEntry
+                if showLevels
+                    line.set_y1(lnSl, tSl)
+                    line.set_y2(lnSl, tSl)
+    else
+        if hitSl
+            exitR := 0.5 * tp1R + 0.5 * (tSl - tEntry) * tradeDir / tRisk
+        else if hitTp2
+            exitR := 0.5 * tp1R + 0.5 * tp2R
+
+if not na(exitR)
+    nTrades += 1
+    netR += exitR
+    if exitR > 0
+        nWins += 1
+        grossWin += exitR
+    else
+        grossLoss += math.abs(exitR)
+    resTxt = (exitR > 0 ? "✔ +" : exitR == 0 ? "• " : "✖ ") + str.tostring(exitR, "#.##") + "R"
+    resCol = exitR > 0 ? color.new(color.green, 10) : exitR == 0 ? color.new(color.gray, 10) : color.new(color.red, 10)
+    label.new(bar_index, tradeDir == 1 ? high : low, resTxt,
+         style = tradeDir == 1 ? label.style_label_down : label.style_label_up,
+         color = resCol, textcolor = color.white, size = size.tiny)
+    tradeDir := 0
+    tTp1Hit := false
+
+if tradeDir != 0 and showLevels
+    line.set_x2(lnEntry, bar_index)
+    line.set_x2(lnSl, bar_index)
+    line.set_x2(lnTp1, bar_index)
+    line.set_x2(lnTp2, bar_index)
+
+// ───── New signals (closed bars only → no repainting) ─────
+canSignal = barstate.isconfirmed and tradeDir == 0 and (na(lastSigBar) or bar_index - lastSigBar >= cooldown)
+longSig   = canSignal and longSetup and longRiskOk
+shortSig  = canSignal and shortSetup and shortRiskOk and not longSig
+
+if longSig or shortSig
+    tradeDir   := longSig ? 1 : -1
+    tEntry     := close
+    tSl        := longSig ? longSl : shortSl
+    tRisk      := math.abs(tEntry - tSl)
+    tTp1       := tEntry + tradeDir * tRisk * tp1R
+    tTp2       := tEntry + tradeDir * tRisk * tp2R
+    tTp1Hit    := false
+    tEntryBar  := bar_index
+    lastSigBar := bar_index
+
+    tip = "Entry " + str.tostring(tEntry, format.mintick) + "\nSL " + str.tostring(tSl, format.mintick) +
+         "\nTP1 " + str.tostring(tTp1, format.mintick) + "\nTP2 " + str.tostring(tTp2, format.mintick) +
+         "\nADX " + str.tostring(adx, "#.0") + "  RSI " + str.tostring(rsi, "#.0")
+    label.new(bar_index, close, longSig ? "BUY" : "SELL",
+         yloc = longSig ? yloc.belowbar : yloc.abovebar,
+         style = longSig ? label.style_label_up : label.style_label_down,
+         color = longSig ? color.new(color.green, 0) : color.new(color.red, 0),
+         textcolor = color.white, size = size.small, tooltip = tip)
+
+    if showLevels
+        lnEntry := line.new(bar_index, tEntry, bar_index, tEntry, color = color.new(color.blue, 0), width = 1)
+        lnSl    := line.new(bar_index, tSl,    bar_index, tSl,    color = color.new(color.red, 0), style = line.style_dashed)
+        lnTp1   := line.new(bar_index, tTp1,   bar_index, tTp1,   color = color.new(color.green, 40), style = line.style_dashed)
+        lnTp2   := line.new(bar_index, tTp2,   bar_index, tTp2,   color = color.new(color.green, 0), style = line.style_dashed)
+
+    msg = (longSig ? "TrendEA Pro BUY " : "TrendEA Pro SELL ") + syminfo.ticker +
+         " @ " + str.tostring(tEntry, format.mintick) + " | SL " + str.tostring(tSl, format.mintick) +
+         " | TP1 " + str.tostring(tTp1, format.mintick) + " | TP2 " + str.tostring(tTp2, format.mintick)
+    alert(msg, alert.freq_once_per_bar_close)
+
+// ───── Plots ─────
+plot(showEmas ? fastEma : na, "Fast EMA",  color = color.new(color.teal, 0), linewidth = 1)
+plot(showEmas ? slowEma : na, "Slow EMA",  color = color.new(color.orange, 0), linewidth = 1)
+plot(showEmas ? baseEma : na, "Trend EMA", color = color.new(color.purple, 0), linewidth = 2)
+
+// ───── Stats panel ─────
+panelPos = switch statsPos
+    "Top right"   => position.top_right
+    "Bottom left" => position.bottom_left
+    "Top left"    => position.top_left
+    => position.bottom_right
+var table stats = table.new(panelPos, 2, 6, bgcolor = color.new(color.black, 25), border_width = 1)
+if showStats and barstate.islast
+    winRate = nTrades > 0 ? nWins * 100.0 / nTrades : 0.0
+    pf      = grossLoss > 0 ? grossWin / grossLoss : na
+    trendTxt = htfBull and bullStack ? "Bullish" : htfBear and bearStack ? "Bearish" : "Neutral"
+    trendCol = trendTxt == "Bullish" ? color.lime : trendTxt == "Bearish" ? color.red : color.gray
+    tradeTxt = tradeDir == 1 ? (tTp1Hit ? "LONG (TP1 ✔)" : "LONG") : tradeDir == -1 ? (tTp1Hit ? "SHORT (TP1 ✔)" : "SHORT") : "—"
+    table.cell(stats, 0, 0, "Trend",      text_color = color.white, text_size = size.small)
+    table.cell(stats, 1, 0, trendTxt,     text_color = trendCol,    text_size = size.small)
+    table.cell(stats, 0, 1, "ADX",        text_color = color.white, text_size = size.small)
+    table.cell(stats, 1, 1, str.tostring(adx, "#.0"), text_color = adx >= adxMin ? color.lime : color.gray, text_size = size.small)
+    table.cell(stats, 0, 2, "Open trade", text_color = color.white, text_size = size.small)
+    table.cell(stats, 1, 2, tradeTxt,     text_color = color.white, text_size = size.small)
+    table.cell(stats, 0, 3, "Signals",    text_color = color.white, text_size = size.small)
+    table.cell(stats, 1, 3, str.tostring(nTrades), text_color = color.white, text_size = size.small)
+    table.cell(stats, 0, 4, "Win rate",   text_color = color.white, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(winRate, "#.0") + "%", text_color = winRate >= 50 ? color.lime : color.orange, text_size = size.small)
+    table.cell(stats, 0, 5, "Net R / PF", text_color = color.white, text_size = size.small)
+    table.cell(stats, 1, 5, str.tostring(netR, "#.#") + "R / " + (na(pf) ? "—" : str.tostring(pf, "#.##")),
+         text_color = netR >= 0 ? color.lime : color.red, text_size = size.small)
+
+// ───── Alerts ─────
+alertcondition(longSig,  "TrendEA Pro Buy",  "TrendEA Pro BUY {{ticker}} @ {{close}}")
+alertcondition(shortSig, "TrendEA Pro Sell", "TrendEA Pro SELL {{ticker}} @ {{close}}")
+alertcondition(longSig or shortSig, "TrendEA Pro Any signal", "TrendEA Pro signal on {{ticker}} @ {{close}}")

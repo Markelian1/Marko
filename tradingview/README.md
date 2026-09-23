@@ -7,7 +7,26 @@ This folder has two scripts. Both use the same logic as the MetaTrader 5 EA in `
 | `TrendEA_Strategy.pine` | `strategy()` | Backtesting in the **Strategy Tester** (net profit, drawdown, list of trades) and strategy alerts |
 | `TrendEA_Indicator.pine` | `indicator()` | Signals on the chart, SL/TP guide lines, a status panel and alerts you can pick from the alert menu |
 
-## Logic
+## TrendEA Pro (recommended)
+
+`TrendEA_Pro_Indicator.pine` / `TrendEA_Pro_Strategy.pine` give fewer, higher-quality signals. A signal fires only when **all** of these agree:
+
+1. The EMAs are in trend order: fast > slow > 200 for longs (mirrored for shorts).
+2. The higher-timeframe trend (15m by default) points the same way. It uses closed HTF bars, so it doesn't repaint.
+3. ADX is at least 20 and DI+/DI− agree with the direction.
+4. Price pulled back to the fast EMA without closing through the slow EMA.
+5. A confirmation candle closes back with the trend and beyond the previous bar.
+6. RSI shows momentum without being overextended, volatility isn't dead, and the session (07:00–20:00 UTC) is open.
+
+The indicator gives one trade at a time: no new signal appears until the open one hits SL or TP.
+- **SL:** placed beyond the recent swing plus an ATR buffer. If it would be too wide, the signal is skipped.
+- **TP1:** 1R, closing 50% of the position.
+- **TP2:** 2R.
+- **Breakeven:** the stop moves to breakeven after TP1.
+
+Every signal is scored on the chart (✔ +1.5R / ✖ -1R). A panel shows the win rate, net R and profit factor.
+
+## Logic (basic version)
 
 - **Buy:** the fast EMA crosses above the slow EMA and RSI is above the buy threshold.
 - **Sell:** the fast EMA crosses below the slow EMA and RSI is below the sell threshold.
