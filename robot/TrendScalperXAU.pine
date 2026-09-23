@@ -13,6 +13,8 @@
 indicator("TrendScalperXAU", shorttitle = "TSXAU", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
 // ───── Inputet ─────
+reverse  = input.bool(true, "E kundert: ku do bente SELL ben BUY dhe anasjelltas", group = "Drejtimi")
+
 grpTP    = "TP / SL (ne pips)"
 pipSize  = input.float(0.10, "1 pip =", step = 0.01, group = grpTP, tooltip = "Ne ar 1 pip = 0.10$ levizje cmimi")
 tp1Pips  = input.int(20, "TP1", minval = 1, group = grpTP)
@@ -322,7 +324,7 @@ if dir != 0 and bar_index > entryBar
             closedNow := true
 
 // Sweep ne anen e kundert: mbyll pozicionin aktual ne mbylljen e qiririt
-if flipOpp and not closedNow and dir != 0 and bar_index > entryBar and barstate.isconfirmed and ((dir == -1 and sweepBuy) or (dir == 1 and sweepSell))
+if flipOpp and not closedNow and dir != 0 and bar_index > entryBar and barstate.isconfirmed and ((sweepBuy and dir == (reverse ? 1 : -1)) or (sweepSell and dir == (reverse ? -1 : 1)))
     setupPips += (tp1Hit ? 1 : 2) * dir * (close - entry) / pipSize
     closedNow := true
 
@@ -366,7 +368,7 @@ if dir == 0 and barstate.isconfirmed and inSess
         slD   = isSweep or isRet ? math.max(minSL, d * (close - (slRef - d * slBuf * pipSize)) / pipSize) : slPips
         if slD <= maxSL or not (isSweep or isRet)
             k2        = not isSweep and not isRet and isKthim
-            dir       := d
+            dir       := reverse ? -d : d
             tp1Only   := k2 and kTP1Only
             entry     := close
             slDist    := slD

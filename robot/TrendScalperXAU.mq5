@@ -21,6 +21,9 @@
 
 #include <Trade\Trade.mqh>
 
+input group "Drejtimi"
+input bool   InpReverse         = true;   // E kundert: ku strategjia do bente SELL ben BUY dhe anasjelltas
+
 input group "Madhesia e pozicionit"
 input double InpLots            = 0.01;   // Loti per secilin nga 2 pozicionet
 input double InpPipSize         = 0.10;   // 1 pip ne ar = 0.10$ levizje cmimi
@@ -256,7 +259,8 @@ void OnTick()
    int sweepDir = (g_sweepBuy != g_sweepSell) ? (g_sweepBuy ? 1 : -1) : 0;
 
    // Sweep ne anen e kundert: mbyll pozicionet e hapura
-   if(InpFlipOpposite && sweepDir != 0 && MyPositionsDir() == -sweepDir)
+   int rev = InpReverse ? -1 : 1;     // strategjia e kundert
+   if(InpFlipOpposite && sweepDir != 0 && MyPositionsDir() == -sweepDir * rev)
       CloseMyPositions();
 
    if(CountMyPositions() > 0) return;   // nje hyrje ne te njejten kohe
@@ -275,12 +279,12 @@ void OnTick()
       double ref   = wick - d * InpSweepSLBuf * pip;
       double slP   = MathMax(InpSweepMinSL, d * (price - ref) / pip);
       if(slP <= InpSweepMaxSL)
-         OpenSetup(d, slP, false, sweepDir != 0 ? "SWEEP" : "RETEST");
+         OpenSetup(d * rev, slP, false, sweepDir != 0 ? "SWEEP" : "RETEST");
       return;
    }
 
    if(trendSig != 0)
-      OpenSetup(trendSig, InpSLPips, isKthim && InpKthimTP1Only, isKthim ? "KTHIM" : "TREND");
+      OpenSetup(trendSig * rev, InpSLPips, isKthim && InpKthimTP1Only, isKthim ? "KTHIM" : "TREND");
 }
 
 //+------------------------------------------------------------------+

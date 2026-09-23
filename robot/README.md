@@ -22,6 +22,10 @@ Punon në grafikun **M1** (i ndryshueshëm) dhe **nuk përdor martingale**.
 
 Përparësia: **SWEEP > RETEST > TREND**.
 
+**Drejtimi i kundërt (`InpReverse`, parazgjedhur `true`):** çdo sinjal ekzekutohet në anën e kundërt.
+Ku strategjia do bënte BUY, roboti bën SELL dhe anasjelltas. SL dhe TP mbeten me të njëjtën distancë në pips.
+Vendose `false` për drejtimin origjinal.
+
 **Çdo hyrje hap 2 pozicione:** TP1 = **20 pips**, TP2 = **50 pips**. Pas TP1, SL e pozicionit 2 kalon 1 pip mbi hyrje.
 Komentet e pozicioneve (`SWEEP TP1`, `RETEST TP2`, `TREND TP2`, `KTHIM TP1`) tregojnë pse hyri roboti.
 
@@ -31,6 +35,7 @@ Komentet e pozicioneve (`SWEEP TP1`, `RETEST TP2`, `TREND TP2`, `KTHIM TP1`) tre
 
 | Parametri | Vlera | Çfarë bën |
 |---|---|---|
+| `InpReverse` | true | Strategjia e kundërt (BUY ↔ SELL) |
 | `InpLots` | 0.01 | Loti për secilin pozicion |
 | `InpTP1Pips` / `InpTP2Pips` | 20 / 50 | Objektivat |
 | `InpSLPips` | 30 | SL për hyrjet TREND |
