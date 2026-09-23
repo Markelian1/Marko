@@ -126,3 +126,19 @@ These defaults are the centre of the robust region, not its best corner (N55 k2)
 | Donchian | 24.1 | 8.2 | 2.9 |
 | TrendEA Pro | 21.1 | 6.8 | 3.1 |
 | **Both** | **45.2** | **11.6** | **3.9** |
+
+## DonchianMulti: more entries (`don2.py`, `don3.py`)
+
+| Idea | Trades/week | PF (2025/2026) | Net R | Max DD (R) | Verdict |
+|---|---|---|---|---|---|
+| Baseline DonchianEA (H1 N40 k3) | 2.2 | 1.46 (1.46/1.46) | 24.1 | 8.2 | — |
+| Partial TP1 50% at 1R + breakeven | 2.2 | 0.74 | -25.6 | 27.2 | ❌ it cuts the winners the edge depends on |
+| Pyramiding (3 units, step 0.5 ATR) | 4.8 | 1.52 | 54.9 | 16.7 | ⚠️ drawdown grows faster than profit |
+| Grid of TF × channel × k (M15/M30/H1) | 1.7–5.7 | 68% of variants PF ≥ 1.2 in both years | | | ✅ robust family |
+| **3 systems: M15 N80 k4 + H1 N30 k3.5 + H1 N60 k3.5** | **9.6** | **1.36 (1.34/1.38)** | **80.6** | **13.3** | ✅ adopted → `DonchianMulti.mq5` |
+
+81 of the 118 multi-system portfolios tested had PF ≥ 1.3 in both years with at least 8 trades per week.
+
+Profit comes in bursts: by quarter it was 6.2, 18.1, 13.7, **47.7**, 0.6 and **−5.7** R, and 9 of 18 months were positive.
+
+At risk r% per trade, expect roughly 80·r % return and 13·r % drawdown over the 17 months. For example, 0.3% gives about +24% with a 4% drawdown.
