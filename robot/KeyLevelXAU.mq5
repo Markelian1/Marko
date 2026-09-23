@@ -49,6 +49,7 @@ input double InpFallbackRR      = 2.0;    // TP kur nuk ka nivel tjeter (ne R)
 input int    InpTPBufPips       = 3;      // TP pak para nivelit tjeter
 input double InpTwoPosRR        = 3.0;    // 2 pozicione vetem kur objektivi >= kaq R
 input double InpTP1R            = 1.0;    // TP1 i pozicionit te pare (ne R)
+input bool   InpSellSpreadAdj   = true;   // SELL: SL/TP zhvendosen me spread-in (mbyllen kur Bid, cmimi ne grafik, i prek)
 input bool   InpBreakEven       = true;   // Pas TP1, SL e pozicionit 2 ne hyrje
 input int    InpBEOffsetPips    = 1;
 
@@ -370,13 +371,16 @@ void OpenTrade(const int dir, const double extreme)
 
    double rr   = dir * (target - price) / pip / risk;
    double lots = NormalizeLots(InpLots);
-   double sl   = NormalizeDouble(price - dir * risk * pip, _Digits);
-   double tp   = NormalizeDouble(target, _Digits);
+   // SELL mbyllet me cmimin Ask, ndersa grafiku tregon Bid. Pa kete, TP mund te preket ne grafik
+   // por te mos mbyllet, sepse Ask eshte ende spread-in me lart.
+   double adj  = (dir < 0 && InpSellSpreadAdj) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) - SymbolInfoDouble(_Symbol, SYMBOL_BID) : 0;
+   double sl   = NormalizeDouble(price - dir * risk * pip + adj, _Digits);
+   double tp   = NormalizeDouble(target + adj, _Digits);
    string tag  = dir > 0 ? "BUY LVL" : "SELL LVL";
 
    if(rr >= InpTwoPosRR)
    {
-      double tp1 = NormalizeDouble(price + dir * InpTP1R * risk * pip, _Digits);
+      double tp1 = NormalizeDouble(price + dir * InpTP1R * risk * pip + adj, _Digits);
       if(!SendOrder(dir, lots, sl, tp1, tag + " TP1")) return;
       SendOrder(dir, lots, sl, tp, tag + " TP2");
    }
