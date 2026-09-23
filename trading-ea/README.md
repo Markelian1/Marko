@@ -22,6 +22,15 @@ This EA uses the same trend-pullback logic as the TradingView "TrendEA Pro" scri
 
 Test it in the Strategy Tester on XAUUSD M15 with "Every tick based on real ticks", then forward-test it on a demo account.
 
+## DonchianEA.mq5 (second strategy, runs alongside TrendEA_Pro)
+
+This EA trades an H1 Donchian channel breakout (40 bars) in the direction of the EMA 200. It has no fixed TP.
+- **Stop:** the initial stop is 3 × ATR. After entry, the stop trails the highest high (or lowest low) since entry at 3 × ATR.
+- **Risk:** 0.5% per trade by default.
+- **Magic number:** it uses its own magic number, so it can run on the same account and symbol as TrendEA_Pro.
+
+On FP Trading XAUUSD history it had PF 1.46 after estimated swap, with a max drawdown of 8.2R. Together with TrendEA_Pro the result was +45R with an 11.6R drawdown.
+
 ## TrendEA.mq5 (basic, not recommended)
 
 This is the original EMA crossover EA. On the XAUUSD history it had no edge.

@@ -96,3 +96,33 @@ Prices match the first dataset (median difference $0.08), but the real spread is
 - v2.1 on M15 is positive in **every quarter** (PF 1.04–2.11). Every nearby setting is positive in both years.
 - The M1 exit check re-played the Jun–Sep 2026 trades on 1-minute bars. The net R was the same (5.61R vs 5.60R) and only one trade had a different outcome, so the M15 bar model is accurate.
 - Faster timeframes and more sessions add trades, but the edge disappears.
+
+## Alternative strategy families (`strat.py`, `strat_run.py`, FP Trading feed)
+
+A family counts as robust only if most of its variants have PF ≥ 1.1 in **both** 2025 and 2026.
+
+| Family | Variants | Trades/day | Median PF | Share robust | Verdict |
+|---|---|---|---|---|---|
+| **Donchian breakout + ATR chandelier trail** | 36 | ~1.1 (H1 ~0.4) | 1.22 (H1: 1.37) | **69%** (H1: 18/18 positive) | ✅ adopted → `DonchianEA.mq5` |
+| Previous-day high/low breakout | 48 | 0.6 | 1.04 | 8% | ❌ |
+| RSI(2) pullback (Connors) | 48 | 1.5 | 0.96 | 0% | ❌ |
+| Supertrend flip + trail | 12 | 1.2 | 1.04 | 0% | ❌ |
+| Inside-bar breakout in trend | 16 | 2.0 | 0.96 | 6% | ❌ |
+
+These defaults are the centre of the robust region, not its best corner (N55 k2).
+
+**DonchianEA defaults:** H1, channel 40, EMA200 filter, 3×ATR initial and trailing stop, no fixed TP.
+- 164 trades, about 2.3 per week.
+- Win rate 43%. Average win +1.11R, average loss −0.55R.
+- Median hold is 16 hours.
+- PF 1.49 (1.50 in 2025 / 1.48 in 2026). Net +25.5R, max drawdown 7.7R.
+- With estimated swap (longs −$0.35/oz/night): PF 1.46, +24.1R. 5 of 6 quarters positive (2026Q2: −2.5R).
+- **The edge comes from longs** (PF 2.17). Shorts: PF 0.87 overall, 0.39 in 2025 and 1.31 in 2026. Both directions are kept, because a trend follower should stay symmetric.
+
+**Portfolio with TrendEA Pro:** the daily correlation is 0.37.
+
+| Portfolio | Net R | Max DD (R) | Return/DD |
+|---|---|---|---|
+| Donchian | 24.1 | 8.2 | 2.9 |
+| TrendEA Pro | 21.1 | 6.8 | 3.1 |
+| **Both** | **45.2** | **11.6** | **3.9** |
