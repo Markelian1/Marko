@@ -14,10 +14,16 @@ Punon në grafikun **M1** (i ndryshueshëm) dhe **nuk përdor martingale**.
 - Roboti mban mend **fundet dhe majat** e fundit (swing), aty ku rrinë stop-et.
 - Kur çmimi **i kalon me bisht** (deri në 30 pips) dhe brenda 2 qirinjve **mbyllet përsëri mbrapa nivelit**, hyn në anën e kundërt, **pavarësisht trendit**.
 - SL = pas bishtit + 5 pips (min 15, max 40). Nëse ka pozicion të hapur në anën e kundërt, e mbyll.
-- SWEEP ka përparësi para TREND.
+
+**3. Hyrjet RETEST (niveli i thyer):**
+- Kur një **fund thyhet poshtë** (qiriri mbyllet nën të), ai bëhet **rezistencë**. Kur çmimi largohet të paktën 20 pips dhe kthehet ta prekë, hyn **SELL**.
+- Kur një **majë thyhet lart**, ajo bëhet **mbështetje**. Kur çmimi kthehet ta prekë, hyn **BUY**.
+- SL = pas nivelit/bishtit + 5 pips (min 15, max 40). Niveli vlen për 120 qirinj.
+
+Përparësia: **SWEEP > RETEST > TREND**.
 
 **Çdo hyrje hap 2 pozicione:** TP1 = **20 pips**, TP2 = **50 pips**. Pas TP1, SL e pozicionit 2 kalon 1 pip mbi hyrje.
-Komentet e pozicioneve (`SWEEP TP1`, `TREND TP2`, `KTHIM TP1`) tregojnë pse hyri roboti.
+Komentet e pozicioneve (`SWEEP TP1`, `RETEST TP2`, `TREND TP2`, `KTHIM TP1`) tregojnë pse hyri roboti.
 
 > 1 pip në ar = 0.10 $ lëvizje çmimi. Me 0.01 lot: 20 pips = 2 $, 50 pips = 5 $.
 
@@ -37,6 +43,8 @@ Komentet e pozicioneve (`SWEEP TP1`, `TREND TP2`, `KTHIM TP1`) tregojnë pse hyr
 | `InpMaxSweepPips` | 30 | Më thellë se kaq = thyerje, jo sweep |
 | `InpSweepMinSL` / `InpSweepMaxSL` | 15 / 40 | Kufijtë e SL për SWEEP |
 | `InpFlipOpposite` | true | SWEEP mbyll pozicionin e kundërt |
+| `InpUseRetest` | true | Hyrjet te niveli i thyer (rezistencë ↔ mbështetje) |
+| `InpRetAwayPips` / `InpRetTolPips` | 20 / 5 | Sa larg duhet të shkojë çmimi / sa afër nivelit quhet prekje |
 | `InpMaxSpreadPips` | 4 | Nuk hyn kur spread-i është i madh |
 | `InpStartHour` / `InpEndHour` | 3 / 21 | Orari (ora e serverit) |
 | `InpDailyLossStop` | 12 | Ndalon për sot pas kësaj humbjeje |

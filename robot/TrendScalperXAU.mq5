@@ -2,7 +2,7 @@
 //|                                             TrendScalperXAU.mq5  |
 //|  Robot per XAUUSD me te njejten logjike si TrendScalperXAU.pine  |
 //|                                                                  |
-//|  Dy lloje hyrjesh (ne grafikun e hyrjes, parazgjedhur M1):       |
+//|  Tre lloje hyrjesh (ne grafikun e hyrjes, parazgjedhur M1):      |
 //|  1. TREND: pullback te EMA 20 ne drejtim te trendit nga 3        |
 //|     timeframe (H1, M15, M5). M5 kunder H1 = KTHIM (vetem TP1).   |
 //|  2. SWEEP: cmimi kalon me bisht nje fund/maje (likuiditet) dhe   |
@@ -17,7 +17,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Marko"
 #property version   "2.10"
-#property description "Scalper per ar: hyrje TREND (3 timeframe) dhe SWEEP (likuiditet), pa martingale."
+#property description "Scalper per ar: hyrje TREND, SWEEP (likuiditet) dhe RETEST (niveli i thyer), pa martingale."
 
 #include <Trade\Trade.mqh>
 

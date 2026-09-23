@@ -1,6 +1,6 @@
 //@version=6
 // TrendScalperXAU
-// Dy lloje hyrjesh:
+// Tre lloje hyrjesh:
 //   1. TREND: pullback te EMA 20 ne drejtim te trendit nga 3 timeframe (1H, 15m, 5m).
 //      Te tre ne te njejtin drejtim = 3/3. 5m kunder 1H = KTHIM (vetem TP1).
 //   2. SWEEP: cmimi merr fundet/majat e barabarta me bisht dhe mbyllet mbrapa nivelit
