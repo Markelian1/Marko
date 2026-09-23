@@ -8,12 +8,15 @@
 //|  2. SWEEP: cmimi kalon me bisht nje fund/maje (likuiditet) dhe   |
 //|     mbyllet mbrapa nivelit -> hyrje ne anen e kundert,           |
 //|     pavaresisht trendit. Mbyll edhe pozicionin e kundert.        |
+//|  3. RETEST: fund i thyer poshte = rezistence, maje e thyer lart  |
+//|     = mbeshtetje. Kur cmimi kthehet ta preke -> hyrje ne         |
+//|     drejtim te thyerjes. Perparesia: SWEEP > RETEST > TREND.     |
 //|                                                                  |
 //|  Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips,              |
 //|  break-even pas TP1. Lot fiks, PA martingale.                    |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "2.00"
+#property version   "2.10"
 #property description "Scalper per ar: hyrje TREND (3 timeframe) dhe SWEEP (likuiditet), pa martingale."
 
 #include <Trade\Trade.mqh>
@@ -56,6 +59,12 @@ input int    InpSweepMinSL      = 15;     // SL minimal (pips)
 input int    InpSweepMaxSL      = 40;     // SL maksimal: me i madh = pa hyrje
 input bool   InpFlipOpposite    = true;   // Sweep-i mbyll pozicionin e kundert
 
+input group "Hyrjet RETEST (niveli i thyer)"
+input bool   InpUseRetest       = true;
+input int    InpRetAwayPips     = 20;     // Cmimi duhet te largohet nga niveli te pakten
+input int    InpRetTolPips      = 5;      // Prekja e nivelit brenda (pips)
+input int    InpRetExpBars      = 120;    // Niveli vlen per kaq qirinj
+
 input group "Kufizime"
 input int    InpMaxSpreadPips   = 4;      // Mos hyj nese spread-i eshte me i madh
 input int    InpStartHour       = 3;      // Ora e serverit kur fillon
@@ -78,6 +87,12 @@ int    g_loCnt[];
 double g_hiLvl[];
 int    g_hiCnt[];
 
+// Nivelet e thyera (per RETEST)
+double g_flLvl[];
+int    g_flDir[];    // 1 = maje e thyer lart (mbeshtetje), -1 = fund i thyer poshte (rezistence)
+long   g_flBar[];
+bool   g_flAway[];
+
 // Sweep-et ne pritje te mbylljes mbrapa nivelit
 long   g_barNo    = 0;
 bool   g_pBuy     = false;
@@ -92,6 +107,10 @@ bool   g_sweepBuy  = false;
 bool   g_sweepSell = false;
 double g_sigLow    = 0;
 double g_sigHigh   = 0;
+bool   g_retBuy    = false;
+bool   g_retSell   = false;
+double g_retLow    = 0;
+double g_retHigh   = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -175,15 +194,18 @@ void OnTick()
    if(!IsSpreadOk())          return;
    if(!AreDailyLimitsOk())    return;
 
-   // SWEEP ka perparesi para TREND
-   if(sweepDir != 0)
+   // SWEEP > RETEST > TREND
+   int retDir = (g_retBuy != g_retSell) ? (g_retBuy ? 1 : -1) : 0;
+   if(sweepDir != 0 || retDir != 0)
    {
+      int    d     = sweepDir != 0 ? sweepDir : retDir;
       double pip   = InpPipSize;
-      double price = sweepDir > 0 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double ref   = sweepDir > 0 ? g_sigLow - InpSweepSLBuf * pip : g_sigHigh + InpSweepSLBuf * pip;
-      double slP   = MathMax(InpSweepMinSL, sweepDir * (price - ref) / pip);
+      double price = d > 0 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double wick  = sweepDir != 0 ? (d > 0 ? g_sigLow : g_sigHigh) : (d > 0 ? g_retLow : g_retHigh);
+      double ref   = wick - d * InpSweepSLBuf * pip;
+      double slP   = MathMax(InpSweepMinSL, d * (price - ref) / pip);
       if(slP <= InpSweepMaxSL)
-         OpenSetup(sweepDir, slP, false, "SWEEP");
+         OpenSetup(d, slP, false, sweepDir != 0 ? "SWEEP" : "RETEST");
       return;
    }
 
@@ -249,6 +271,8 @@ void ProcessBar(const int s)
    g_barNo++;
    g_sweepBuy  = false;
    g_sweepSell = false;
+   g_retBuy    = false;
+   g_retSell   = false;
 
    double pip = InpPipSize;
 
@@ -268,6 +292,28 @@ void ProcessBar(const int s)
    if(g_pBuy  && g_barNo > g_pBuyExp)  g_pBuy  = false;
    if(g_pSell && g_barNo > g_pSellExp) g_pSell = false;
 
+   // Retest i niveleve te thyera me pare
+   for(int k = ArraySize(g_flLvl) - 1; k >= 0; k--)
+   {
+      double lvl = g_flLvl[k];
+      int    fd  = g_flDir[k];
+      if(g_barNo - g_flBar[k] > InpRetExpBars || fd * (c - lvl) < 0)
+      {
+         RemoveFlip(k);
+         continue;
+      }
+      bool touched = fd == 1 ? l <= lvl + InpRetTolPips * pip : h >= lvl - InpRetTolPips * pip;
+      bool bodyOk  = !InpNeedBody || fd * (c - o) > 0;
+      if(InpUseRetest && g_flAway[k] && touched && bodyOk && !g_retBuy && !g_retSell)
+      {
+         if(fd == 1) { g_retBuy  = true; g_retLow  = MathMin(l, lvl); }
+         else        { g_retSell = true; g_retHigh = MathMax(h, lvl); }
+         RemoveFlip(k);
+      }
+      else if(fd * ((fd == 1 ? h : l) - lvl) >= InpRetAwayPips * pip)
+         g_flAway[k] = true;
+   }
+
    int needCnt = InpNeedEqual ? 2 : 1;
 
    // Fundet qe u kaluan: likuiditeti poshte u mor
@@ -283,6 +329,7 @@ void ProcessBar(const int s)
             g_pBuy    = true;
             g_pBuyExp = g_barNo + InpConfBars;
          }
+         if(c < lvl) AddFlip(lvl, -1);   // fundi u thye: tani rezistence
          RemoveLevel(g_loLvl, g_loCnt, k);
       }
    }
@@ -300,6 +347,7 @@ void ProcessBar(const int s)
             g_pSell    = true;
             g_pSellExp = g_barNo + InpConfBars;
          }
+         if(c > lvl) AddFlip(lvl, 1);    // maja u thye: tani mbeshtetje
          RemoveLevel(g_hiLvl, g_hiCnt, k);
       }
    }
@@ -396,6 +444,42 @@ void RemoveLevel(double &lvl[], int &cnt[], const int idx)
    }
    ArrayResize(lvl, n - 1);
    ArrayResize(cnt, n - 1);
+}
+
+//+------------------------------------------------------------------+
+void AddFlip(const double lvl, const int d)
+{
+   int n = ArraySize(g_flLvl);
+   if(n >= 10)
+   {
+      RemoveFlip(0);
+      n--;
+   }
+   ArrayResize(g_flLvl, n + 1);
+   ArrayResize(g_flDir, n + 1);
+   ArrayResize(g_flBar, n + 1);
+   ArrayResize(g_flAway, n + 1);
+   g_flLvl[n]  = lvl;
+   g_flDir[n]  = d;
+   g_flBar[n]  = g_barNo;
+   g_flAway[n] = false;
+}
+
+//+------------------------------------------------------------------+
+void RemoveFlip(const int idx)
+{
+   int n = ArraySize(g_flLvl);
+   for(int k = idx; k < n - 1; k++)
+   {
+      g_flLvl[k]  = g_flLvl[k + 1];
+      g_flDir[k]  = g_flDir[k + 1];
+      g_flBar[k]  = g_flBar[k + 1];
+      g_flAway[k] = g_flAway[k + 1];
+   }
+   ArrayResize(g_flLvl, n - 1);
+   ArrayResize(g_flDir, n - 1);
+   ArrayResize(g_flBar, n - 1);
+   ArrayResize(g_flAway, n - 1);
 }
 
 //+------------------------------------------------------------------+

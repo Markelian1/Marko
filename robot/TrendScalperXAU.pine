@@ -6,6 +6,9 @@
 //   2. SWEEP: cmimi merr fundet/majat e barabarta me bisht dhe mbyllet mbrapa nivelit
 //      -> hyrje ne anen e kundert, pavaresisht trendit (p.sh. BUY ne fund te nje renieje).
 //      Sweep-i mbyll edhe pozicionin e kundert nese ka nje te hapur.
+//   3. RETEST: nje fund i thyer poshte behet rezistence, nje maje e thyer lart behet mbeshtetje.
+//      Kur cmimi largohet dhe kthehet ta preke nivelin -> SELL / BUY ne drejtim te thyerjes.
+// Perparesia: SWEEP > RETEST > TREND.
 // Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips, break-even pas TP1.
 indicator("TrendScalperXAU", shorttitle = "TSXAU", overlay = true, max_lines_count = 500, max_labels_count = 500)
 
@@ -42,6 +45,12 @@ minSL    = input.int(15, "SL minimal (pips)", minval = 1, group = grpLiq)
 maxSL    = input.int(40, "SL maksimal (pips)", minval = 1, group = grpLiq, tooltip = "Nese SL del me i madh, hyrja anulohet")
 flipOpp  = input.bool(true, "Sweep-i mbyll pozicionin e kundert", group = grpLiq)
 showLiq  = input.bool(true, "Shfaq nivelet e likuiditetit", group = grpLiq)
+
+grpRet   = "Hyrjet RETEST (niveli i thyer)"
+useRet   = input.bool(true, "Lejo hyrjet RETEST", group = grpRet, tooltip = "Fund i thyer poshte behet rezistence (SELL kur rikthehet), maje e thyer lart behet mbeshtetje (BUY). SL dhe min/max SL si te SWEEP.")
+retAway  = input.int(20, "Cmimi duhet te largohet nga niveli te pakten (pips)", minval = 1, group = grpRet)
+retTol   = input.int(5, "Prekja e nivelit brenda (pips)", minval = 0, group = grpRet)
+retExp   = input.int(120, "Niveli vlen per kaq qirinj", minval = 5, group = grpRet)
 
 grpView  = "Pamja / llogaritja"
 useSess  = input.bool(false, "Vetem brenda orarit", group = grpView)
@@ -129,6 +138,55 @@ if not na(ph)
             hiCnt.shift()
             line.delete(hiLn.shift())
 
+// ───── Nivelet e thyera: rezistence -> mbeshtetje dhe anasjelltas ─────
+var array<float> flLvl  = array.new<float>()
+var array<int>   flDir  = array.new<int>()    // 1 = maje e thyer lart (tani mbeshtetje), -1 = fund i thyer poshte (tani rezistence)
+var array<int>   flBar  = array.new<int>()
+var array<bool>  flAway = array.new<bool>()   // cmimi u largua mjaftueshem nga niveli pas thyerjes
+
+addFlip(float lvl, int d) =>
+    flLvl.push(lvl)
+    flDir.push(d)
+    flBar.push(bar_index)
+    flAway.push(false)
+    if flLvl.size() > 10
+        flLvl.shift()
+        flDir.shift()
+        flBar.shift()
+        flAway.shift()
+    lvl
+
+// Retest: cmimi kthehet te niveli i thyer dhe mbyllet ne anen e thyerjes
+bool  retBuy  = false
+bool  retSell = false
+float retLow  = na
+float retHigh = na
+if flLvl.size() > 0
+    for k = flLvl.size() - 1 to 0
+        lvl = flLvl.get(k)
+        fd  = flDir.get(k)
+        if bar_index - flBar.get(k) > retExp or fd * (close - lvl) < 0
+            flLvl.remove(k)
+            flDir.remove(k)
+            flBar.remove(k)
+            flAway.remove(k)
+        else
+            touched = fd == 1 ? low <= lvl + retTol * pipSize : high >= lvl - retTol * pipSize
+            bodyOk  = not needBody or fd * (close - open) > 0
+            if useRet and flAway.get(k) and touched and bodyOk and not retBuy and not retSell
+                if fd == 1
+                    retBuy := true
+                    retLow := math.min(low, lvl)
+                else
+                    retSell := true
+                    retHigh := math.max(high, lvl)
+                flLvl.remove(k)
+                flDir.remove(k)
+                flBar.remove(k)
+                flAway.remove(k)
+            else if fd * ((fd == 1 ? high : low) - lvl) >= retAway * pipSize
+                flAway.set(k, true)
+
 // ───── Sweep-et ─────
 var float pBuyLvl  = na
 var float pBuyLow  = na
@@ -154,6 +212,8 @@ if loLvl.size() > 0
                 pBuyLvl := na(pBuyLvl) ? lvl : math.min(pBuyLvl, lvl)
                 pBuyLow := na(pBuyLow) ? low : math.min(pBuyLow, low)
                 pBuyExp := bar_index + confBars
+            if close < lvl
+                addFlip(lvl, -1)
             ln = loLn.get(k)
             line.set_extend(ln, extend.none)
             line.set_x2(ln, bar_index)
@@ -169,6 +229,8 @@ if hiLvl.size() > 0
                 pSellLvl := na(pSellLvl) ? lvl : math.max(pSellLvl, lvl)
                 pSellHi  := na(pSellHi) ? high : math.max(pSellHi, high)
                 pSellExp := bar_index + confBars
+            if close > lvl
+                addFlip(lvl, 1)
             ln = hiLn.get(k)
             line.set_extend(ln, extend.none)
             line.set_x2(ln, bar_index)
@@ -222,6 +284,7 @@ var line  lnTP2     = na
 var int   setups    = 0
 var int   nKthim    = 0
 var int   nSweep    = 0
+var int   nRetest   = 0
 var int   wins      = 0
 var int   losses    = 0
 var float totalPips = 0.0
@@ -282,22 +345,27 @@ if closedNow
     dir    := 0
     tp1Hit := false
 
-// Hyrja: SWEEP ka perparesi para TREND
+// Hyrja: SWEEP > RETEST > TREND
 inSess = not useSess or not na(time(timeframe.period, sess))
 bool enteredLong  = false
 bool enteredShort = false
 if dir == 0 and barstate.isconfirmed and inSess
     d       = 0
     isSweep = false
+    isRet   = false
     if sweepBuy != sweepSell
         d       := sweepBuy ? 1 : -1
         isSweep := true
+    else if retBuy != retSell
+        d     := retBuy ? 1 : -1
+        isRet := true
     else if buySig != sellSig
         d := buySig ? 1 : -1
     if d != 0
-        slD = isSweep ? math.max(minSL, d * (close - (d == 1 ? sigLow - slBuf * pipSize : sigHigh + slBuf * pipSize)) / pipSize) : slPips
-        if slD <= maxSL or not isSweep
-            k2        = not isSweep and isKthim
+        slRef = isSweep ? (d == 1 ? sigLow : sigHigh) : (d == 1 ? retLow : retHigh)
+        slD   = isSweep or isRet ? math.max(minSL, d * (close - (slRef - d * slBuf * pipSize)) / pipSize) : slPips
+        if slD <= maxSL or not (isSweep or isRet)
+            k2        = not isSweep and not isRet and isKthim
             dir       := d
             tp1Only   := k2 and kTP1Only
             entry     := close
@@ -311,15 +379,16 @@ if dir == 0 and barstate.isconfirmed and inSess
             setups    += 1
             nKthim    += k2 ? 1 : 0
             nSweep    += isSweep ? 1 : 0
+            nRetest   += isRet ? 1 : 0
             lnEntry   := line.new(bar_index, entry, bar_index, entry, color = color.gray)
             lnSL      := line.new(bar_index, sl,    bar_index, sl,    color = color.red, width = 2)
             lnTP1     := line.new(bar_index, tp1,   bar_index, tp1,   color = color.teal, style = line.style_dashed)
             lnTP2     := line.new(bar_index, tp2,   bar_index, tp2,   color = color.green, width = 2)
-            tag = isSweep ? " SWEEP" : isForte ? " 3/3" : k2 ? " KTHIM" : ""
+            tag = isSweep ? " SWEEP" : isRet ? " RETEST" : isForte ? " 3/3" : k2 ? " KTHIM" : ""
             label.new(bar_index, 0, (dir == 1 ? "BUY" : "SELL") + tag,
                  yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
                  style = dir == 1 ? label.style_label_up : label.style_label_down,
-                 color = isSweep ? (dir == 1 ? color.new(color.blue, 0) : color.new(color.purple, 0)) : k2 ? (dir == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0)) : (dir == 1 ? color.green : color.red),
+                 color = isSweep ? (dir == 1 ? color.new(color.blue, 0) : color.new(color.purple, 0)) : isRet ? (dir == 1 ? color.new(color.olive, 0) : color.new(color.orange, 0)) : k2 ? (dir == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0)) : (dir == 1 ? color.green : color.red),
                  textcolor = color.white, size = size.small)
             enteredLong  := dir == 1
             enteredShort := dir == -1
@@ -354,8 +423,8 @@ if barstate.islast
     table.cell(stats, 1, 2, trendTxt(tM), text_color = trendCol(tM), text_size = size.small)
     table.cell(stats, 0, 3, "Trend " + tfLow, text_color = txt, text_size = size.small)
     table.cell(stats, 1, 3, trendTxt(tL), text_color = trendCol(tL), text_size = size.small)
-    table.cell(stats, 0, 4, "Hyrje (kthim / sweep)", text_color = txt, text_size = size.small)
-    table.cell(stats, 1, 4, str.tostring(setups) + " (" + str.tostring(nKthim) + " / " + str.tostring(nSweep) + ")", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 4, "Hyrje (kthim / sweep / retest)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(setups) + " (" + str.tostring(nKthim) + " / " + str.tostring(nSweep) + " / " + str.tostring(nRetest) + ")", text_color = txt, text_size = size.small)
     table.cell(stats, 0, 5, "Fitues / Humbes", text_color = txt, text_size = size.small)
     table.cell(stats, 1, 5, str.tostring(wins) + " / " + str.tostring(losses), text_color = txt, text_size = size.small)
     table.cell(stats, 0, 6, "Win rate", text_color = txt, text_size = size.small)
