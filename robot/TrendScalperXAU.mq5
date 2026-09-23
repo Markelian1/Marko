@@ -1,15 +1,20 @@
 //+------------------------------------------------------------------+
 //|                                             TrendScalperXAU.mq5  |
-//|  Scalper për XAUUSD që ndjek trendin.                            |
-//|  - Trendi: EMA e shpejtë / e ngadaltë në M15                      |
-//|  - Hyrja: pullback te EMA20 në M5 dhe mbyllje në drejtim trendi  |
-//|  - Hap 2 pozicione: TP1 (20 pips) dhe TP2 (50 pips)              |
-//|  - Pas TP1, SL e pozicionit të dytë kalon në break-even          |
-//|  - Lot fiks, PA martingale                                        |
+//|  Robot per XAUUSD me te njejten logjike si TrendScalperXAU.pine  |
+//|                                                                  |
+//|  Dy lloje hyrjesh (ne grafikun e hyrjes, parazgjedhur M1):       |
+//|  1. TREND: pullback te EMA 20 ne drejtim te trendit nga 3        |
+//|     timeframe (H1, M15, M5). M5 kunder H1 = KTHIM (vetem TP1).   |
+//|  2. SWEEP: cmimi kalon me bisht nje fund/maje (likuiditet) dhe   |
+//|     mbyllet mbrapa nivelit -> hyrje ne anen e kundert,           |
+//|     pavaresisht trendit. Mbyll edhe pozicionin e kundert.        |
+//|                                                                  |
+//|  Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips,              |
+//|  break-even pas TP1. Lot fiks, PA martingale.                    |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "1.00"
-#property description "Scalper per ar qe ndjek trendin, TP1 20 pips / TP2 50 pips, pa martingale."
+#property version   "2.00"
+#property description "Scalper per ar: hyrje TREND (3 timeframe) dhe SWEEP (likuiditet), pa martingale."
 
 #include <Trade\Trade.mqh>
 
@@ -20,18 +25,36 @@ input double InpPipSize         = 0.10;   // 1 pip ne ar = 0.10$ levizje cmimi
 input group "TP / SL (ne pips)"
 input int    InpTP1Pips         = 20;     // TP i pozicionit 1
 input int    InpTP2Pips         = 50;     // TP i pozicionit 2
-input int    InpSLPips          = 30;     // SL per te dy pozicionet
+input int    InpSLPips          = 30;     // SL per hyrjet TREND
 input bool   InpBreakEven       = true;   // Pas TP1, SL e pozicionit 2 ne hyrje
 input int    InpBEOffsetPips    = 1;      // Sa pips mbi hyrje (mbulon komisionin)
 
-input group "Filtri i trendit"
-input ENUM_TIMEFRAMES InpTrendTF      = PERIOD_M15;
-input int    InpTrendFastEMA    = 50;
-input int    InpTrendSlowEMA    = 200;
+input group "Grafiku i hyrjes"
+input ENUM_TIMEFRAMES InpEntryTF = PERIOD_M1;
 
-input group "Sinjali i hyrjes"
-input ENUM_TIMEFRAMES InpEntryTF      = PERIOD_M5;
-input int    InpEntryEMA        = 20;
+input group "Hyrjet TREND (3 timeframe)"
+input bool   InpUseTrend        = true;
+input ENUM_TIMEFRAMES InpTFHigh = PERIOD_H1;   // Trendi kryesor
+input ENUM_TIMEFRAMES InpTFMid  = PERIOD_M15;  // Trendi i mesem
+input ENUM_TIMEFRAMES InpTFLow  = PERIOD_M5;   // Trendi i shpejte
+input int    InpFastEMA         = 21;
+input int    InpSlowEMA         = 50;
+input bool   InpAllowKthim      = true;   // Lejo hyrje ne kthime (kunder trendit kryesor)
+input bool   InpKthimTP1Only    = true;   // Ne kthime te dy pozicionet mbyllen ne TP1
+input int    InpEntryEMA        = 20;     // EMA e pullback-ut
+
+input group "Hyrjet SWEEP (likuiditet)"
+input bool   InpUseSweep        = true;
+input int    InpPivotLen        = 3;      // Forca e swing-ut (qirinj majtas/djathtas)
+input int    InpEqTolPips       = 20;     // Toleranca per fundet/majat e barabarta
+input bool   InpNeedEqual       = false;  // Vetem nivele te dyfishta (equal lows/highs)
+input int    InpMaxSweepPips    = 30;     // Me thelle se kaq = thyerje, jo sweep
+input int    InpConfBars        = 2;      // Qirinj per t'u kthyer mbrapa nivelit
+input bool   InpNeedBody        = true;   // Qiriri i hyrjes ne drejtim te tregtimit
+input int    InpSweepSLBuf      = 5;      // SL pas bishtit (pips)
+input int    InpSweepMinSL      = 15;     // SL minimal (pips)
+input int    InpSweepMaxSL      = 40;     // SL maksimal: me i madh = pa hyrje
+input bool   InpFlipOpposite    = true;   // Sweep-i mbyll pozicionin e kundert
 
 input group "Kufizime"
 input int    InpMaxSpreadPips   = 4;      // Mos hyj nese spread-i eshte me i madh
@@ -42,27 +65,60 @@ input double InpDailyLossStop   = 12;     // Ndalo per sot pas kesaj humbjeje (0
 input int    InpMaxSetupsPerDay = 10;     // Sa hyrje (me nga 2 pozicione) ne dite
 input ulong  InpMagic           = 20260923;
 
-CTrade   trade;
-int      hTrendFast = INVALID_HANDLE;
-int      hTrendSlow = INVALID_HANDLE;
-int      hEntryEMA  = INVALID_HANDLE;
-datetime g_lastBarTime = 0;
+CTrade          trade;
+ENUM_TIMEFRAMES g_tfs[3];
+int             hFast[3];
+int             hSlow[3];
+int             hEntryEMA = INVALID_HANDLE;
+datetime        g_lastBarTime = 0;
+
+// Nivelet e likuiditetit
+double g_loLvl[];
+int    g_loCnt[];
+double g_hiLvl[];
+int    g_hiCnt[];
+
+// Sweep-et ne pritje te mbylljes mbrapa nivelit
+long   g_barNo    = 0;
+bool   g_pBuy     = false;
+double g_pBuyLvl  = 0, g_pBuyLow = 0;
+long   g_pBuyExp  = 0;
+bool   g_pSell    = false;
+double g_pSellLvl = 0, g_pSellHi = 0;
+long   g_pSellExp = 0;
+
+// Sinjalet e qiririt te fundit te mbyllur
+bool   g_sweepBuy  = false;
+bool   g_sweepSell = false;
+double g_sigLow    = 0;
+double g_sigHigh   = 0;
 
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   if(InpTP1Pips <= 0 || InpTP2Pips <= InpTP1Pips || InpSLPips <= 0 || InpPipSize <= 0)
+   if(InpTP1Pips <= 0 || InpTP2Pips <= InpTP1Pips || InpSLPips <= 0 || InpPipSize <= 0 || InpPivotLen < 1)
    {
-      Print("Parametra te gabuar: duhet TP2 > TP1 > 0, SL > 0 dhe PipSize > 0");
+      Print("Parametra te gabuar: duhet TP2 > TP1 > 0, SL > 0, PipSize > 0 dhe PivotLen >= 1");
       return INIT_PARAMETERS_INCORRECT;
    }
 
-   hTrendFast = iMA(_Symbol, InpTrendTF, InpTrendFastEMA, 0, MODE_EMA, PRICE_CLOSE);
-   hTrendSlow = iMA(_Symbol, InpTrendTF, InpTrendSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
-   hEntryEMA  = iMA(_Symbol, InpEntryTF, InpEntryEMA, 0, MODE_EMA, PRICE_CLOSE);
-   if(hTrendFast == INVALID_HANDLE || hTrendSlow == INVALID_HANDLE || hEntryEMA == INVALID_HANDLE)
+   g_tfs[0] = InpTFHigh;
+   g_tfs[1] = InpTFMid;
+   g_tfs[2] = InpTFLow;
+   for(int i = 0; i < 3; i++)
    {
-      Print("Nuk u krijuan indikatoret EMA");
+      hFast[i] = iMA(_Symbol, g_tfs[i], InpFastEMA, 0, MODE_EMA, PRICE_CLOSE);
+      hSlow[i] = iMA(_Symbol, g_tfs[i], InpSlowEMA, 0, MODE_EMA, PRICE_CLOSE);
+      if(hFast[i] == INVALID_HANDLE || hSlow[i] == INVALID_HANDLE)
+      {
+         Print("Nuk u krijuan indikatoret EMA te trendit");
+         return INIT_FAILED;
+      }
+   }
+   hEntryEMA = iMA(_Symbol, InpEntryTF, InpEntryEMA, 0, MODE_EMA, PRICE_CLOSE);
+   if(hEntryEMA == INVALID_HANDLE)
+   {
+      Print("Nuk u krijua EMA e hyrjes");
       return INIT_FAILED;
    }
 
@@ -75,9 +131,12 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   if(hTrendFast != INVALID_HANDLE) IndicatorRelease(hTrendFast);
-   if(hTrendSlow != INVALID_HANDLE) IndicatorRelease(hTrendSlow);
-   if(hEntryEMA  != INVALID_HANDLE) IndicatorRelease(hEntryEMA);
+   for(int i = 0; i < 3; i++)
+   {
+      if(hFast[i] != INVALID_HANDLE) IndicatorRelease(hFast[i]);
+      if(hSlow[i] != INVALID_HANDLE) IndicatorRelease(hSlow[i]);
+   }
+   if(hEntryEMA != INVALID_HANDLE) IndicatorRelease(hEntryEMA);
 }
 
 //+------------------------------------------------------------------+
@@ -85,48 +144,76 @@ void OnTick()
 {
    ManageBreakEven();
 
-   // Sinjalet kontrollohen vetem kur hapet nje qiri i ri ne M5
+   // Sinjalet kontrollohen vetem kur mbyllet nje qiri ne grafikun e hyrjes
    datetime barTime = iTime(_Symbol, InpEntryTF, 0);
    if(barTime == 0 || barTime == g_lastBarTime)
       return;
+   bool firstRun = (g_lastBarTime == 0);
    g_lastBarTime = barTime;
+
+   if(firstRun)
+      Warmup();          // nderton nivelet e likuiditetit nga historia
+   ProcessBar(1);
+
+   // Trendi nga 3 timeframe
+   int  tH       = TFTrend(0);
+   int  tM       = TFTrend(1);
+   int  tL       = TFTrend(2);
+   int  baseDir  = (tL != 0 && tM != -tL) ? tL : 0;
+   bool isKthim  = (baseDir != 0 && tH == -baseDir);
+   int  tradeDir = (isKthim && !InpAllowKthim) ? 0 : baseDir;
+   int  trendSig = InpUseTrend ? GetTrendSignal(tradeDir) : 0;
+
+   int sweepDir = (g_sweepBuy != g_sweepSell) ? (g_sweepBuy ? 1 : -1) : 0;
+
+   // Sweep ne anen e kundert: mbyll pozicionet e hapura
+   if(InpFlipOpposite && sweepDir != 0 && MyPositionsDir() == -sweepDir)
+      CloseMyPositions();
 
    if(CountMyPositions() > 0) return;   // nje hyrje ne te njejten kohe
    if(!IsTradingHour())       return;
    if(!IsSpreadOk())          return;
    if(!AreDailyLimitsOk())    return;
 
-   int trend = GetTrend();
-   if(trend == 0) return;
+   // SWEEP ka perparesi para TREND
+   if(sweepDir != 0)
+   {
+      double pip   = InpPipSize;
+      double price = sweepDir > 0 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+      double ref   = sweepDir > 0 ? g_sigLow - InpSweepSLBuf * pip : g_sigHigh + InpSweepSLBuf * pip;
+      double slP   = MathMax(InpSweepMinSL, sweepDir * (price - ref) / pip);
+      if(slP <= InpSweepMaxSL)
+         OpenSetup(sweepDir, slP, false, "SWEEP");
+      return;
+   }
 
-   int signal = GetEntrySignal(trend);
-   if(signal != 0)
-      OpenSetup(signal);
+   if(trendSig != 0)
+      OpenSetup(trendSig, InpSLPips, isKthim && InpKthimTP1Only, isKthim ? "KTHIM" : "TREND");
 }
 
 //+------------------------------------------------------------------+
-//| +1 = trend lart, -1 = trend poshte, 0 = pa trend te qarte         |
+//| +1 = lart, -1 = poshte, 0 = pa drejtim (vetem qirinj te mbyllur)  |
 //+------------------------------------------------------------------+
-int GetTrend()
+int TFTrend(const int i)
 {
-   double fast[1], slow[1];
-   if(CopyBuffer(hTrendFast, 0, 1, 1, fast) != 1) return 0;
-   if(CopyBuffer(hTrendSlow, 0, 1, 1, slow) != 1) return 0;
+   double f[1], s[1];
+   if(CopyBuffer(hFast[i], 0, 1, 1, f) != 1) return 0;
+   if(CopyBuffer(hSlow[i], 0, 1, 1, s) != 1) return 0;
+   double c = iClose(_Symbol, g_tfs[i], 1);
+   if(c == 0) return 0;
 
-   double close = iClose(_Symbol, InpTrendTF, 1);
-   if(close == 0) return 0;
-
-   if(fast[0] > slow[0] && close > fast[0]) return  1;
-   if(fast[0] < slow[0] && close < fast[0]) return -1;
+   if(f[0] > s[0] && c > f[0]) return  1;
+   if(f[0] < s[0] && c < f[0]) return -1;
    return 0;
 }
 
 //+------------------------------------------------------------------+
-//| Pullback: qiriri i fundit preku EMA20 dhe u mbyll ne drejtim te   |
+//| Pullback: qiriri i fundit preku EMA 20 dhe u mbyll ne drejtim te  |
 //| trendit (buy: qiri jeshil mbi EMA, sell: qiri i kuq nen EMA).     |
 //+------------------------------------------------------------------+
-int GetEntrySignal(const int trend)
+int GetTrendSignal(const int trend)
 {
+   if(trend == 0) return 0;
    double ema[1];
    if(CopyBuffer(hEntryEMA, 0, 1, 1, ema) != 1) return 0;
 
@@ -142,42 +229,214 @@ int GetEntrySignal(const int trend)
 }
 
 //+------------------------------------------------------------------+
-//| Hap 2 pozicione me te njejtin SL: njeri me TP1, tjetri me TP2     |
+//| Kalon historine qe nivelet e likuiditetit te jene gati qe ne     |
+//| fillim. Sinjalet e historise injorohen.                           |
 //+------------------------------------------------------------------+
-void OpenSetup(const int dir)
+void Warmup()
+{
+   int bars  = Bars(_Symbol, InpEntryTF);
+   int start = MathMin(300, bars - 2 * InpPivotLen - 2);
+   for(int s = start; s >= 2; s--)
+      ProcessBar(s);
+}
+
+//+------------------------------------------------------------------+
+//| Perpunon qiririn e mbyllur ne shift s: nivele te reja, sweep-e    |
+//| dhe sinjali SWEEP (g_sweepBuy / g_sweepSell).                     |
+//+------------------------------------------------------------------+
+void ProcessBar(const int s)
+{
+   g_barNo++;
+   g_sweepBuy  = false;
+   g_sweepSell = false;
+
+   double pip = InpPipSize;
+
+   // Swing i ri i konfirmuar (qiriri s + PivotLen)
+   int p = s + InpPivotLen;
+   if(IsPivotLow(p))
+      AddLevel(g_loLvl, g_loCnt, iLow(_Symbol, InpEntryTF, p), true);
+   if(IsPivotHigh(p))
+      AddLevel(g_hiLvl, g_hiCnt, iHigh(_Symbol, InpEntryTF, p), false);
+
+   double o = iOpen (_Symbol, InpEntryTF, s);
+   double h = iHigh (_Symbol, InpEntryTF, s);
+   double l = iLow  (_Symbol, InpEntryTF, s);
+   double c = iClose(_Symbol, InpEntryTF, s);
+   if(c == 0) return;
+
+   if(g_pBuy  && g_barNo > g_pBuyExp)  g_pBuy  = false;
+   if(g_pSell && g_barNo > g_pSellExp) g_pSell = false;
+
+   int needCnt = InpNeedEqual ? 2 : 1;
+
+   // Fundet qe u kaluan: likuiditeti poshte u mor
+   for(int k = ArraySize(g_loLvl) - 1; k >= 0; k--)
+   {
+      double lvl = g_loLvl[k];
+      if(l < lvl)
+      {
+         if(g_loCnt[k] >= needCnt && lvl - l <= InpMaxSweepPips * pip)
+         {
+            g_pBuyLvl = g_pBuy ? MathMin(g_pBuyLvl, lvl) : lvl;
+            g_pBuyLow = g_pBuy ? MathMin(g_pBuyLow, l) : l;
+            g_pBuy    = true;
+            g_pBuyExp = g_barNo + InpConfBars;
+         }
+         RemoveLevel(g_loLvl, g_loCnt, k);
+      }
+   }
+
+   // Majat qe u kaluan: likuiditeti lart u mor
+   for(int k = ArraySize(g_hiLvl) - 1; k >= 0; k--)
+   {
+      double lvl = g_hiLvl[k];
+      if(h > lvl)
+      {
+         if(g_hiCnt[k] >= needCnt && h - lvl <= InpMaxSweepPips * pip)
+         {
+            g_pSellLvl = g_pSell ? MathMax(g_pSellLvl, lvl) : lvl;
+            g_pSellHi  = g_pSell ? MathMax(g_pSellHi, h) : h;
+            g_pSell    = true;
+            g_pSellExp = g_barNo + InpConfBars;
+         }
+         RemoveLevel(g_hiLvl, g_hiCnt, k);
+      }
+   }
+
+   // Nese cmimi vazhdon shume pertej nivelit, eshte thyerje e vertete
+   if(g_pBuy)
+   {
+      g_pBuyLow = MathMin(g_pBuyLow, l);
+      if(g_pBuyLvl - g_pBuyLow > InpMaxSweepPips * pip) g_pBuy = false;
+   }
+   if(g_pSell)
+   {
+      g_pSellHi = MathMax(g_pSellHi, h);
+      if(g_pSellHi - g_pSellLvl > InpMaxSweepPips * pip) g_pSell = false;
+   }
+
+   // Sinjali: mbyllje perseri mbrapa nivelit qe u mor
+   if(InpUseSweep && g_pBuy && c > g_pBuyLvl && (!InpNeedBody || c > o))
+   {
+      g_sweepBuy = true;
+      g_sigLow   = g_pBuyLow;
+      g_pBuy     = false;
+   }
+   if(InpUseSweep && g_pSell && c < g_pSellLvl && (!InpNeedBody || c < o))
+   {
+      g_sweepSell = true;
+      g_sigHigh   = g_pSellHi;
+      g_pSell     = false;
+   }
+}
+
+//+------------------------------------------------------------------+
+bool IsPivotLow(const int p)
+{
+   double v = iLow(_Symbol, InpEntryTF, p);
+   if(v == 0) return false;
+   for(int j = 1; j <= InpPivotLen; j++)
+   {
+      double left  = iLow(_Symbol, InpEntryTF, p + j);
+      double right = iLow(_Symbol, InpEntryTF, p - j);
+      if(left == 0 || left <= v || right < v) return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+bool IsPivotHigh(const int p)
+{
+   double v = iHigh(_Symbol, InpEntryTF, p);
+   if(v == 0) return false;
+   for(int j = 1; j <= InpPivotLen; j++)
+   {
+      double left  = iHigh(_Symbol, InpEntryTF, p + j);
+      double right = iHigh(_Symbol, InpEntryTF, p - j);
+      if(left == 0 || left >= v || right > v) return false;
+   }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Nivel i ri likuiditeti; bashkohet me nje nivel afer (equal lows)  |
+//+------------------------------------------------------------------+
+void AddLevel(double &lvl[], int &cnt[], const double price, const bool isLow)
+{
+   int n = ArraySize(lvl);
+   for(int k = 0; k < n; k++)
+   {
+      if(MathAbs(lvl[k] - price) <= InpEqTolPips * InpPipSize)
+      {
+         lvl[k] = isLow ? MathMin(lvl[k], price) : MathMax(lvl[k], price);
+         cnt[k]++;
+         return;
+      }
+   }
+   if(n >= 12)
+   {
+      RemoveLevel(lvl, cnt, 0);
+      n--;
+   }
+   ArrayResize(lvl, n + 1);
+   ArrayResize(cnt, n + 1);
+   lvl[n] = price;
+   cnt[n] = 1;
+}
+
+//+------------------------------------------------------------------+
+void RemoveLevel(double &lvl[], int &cnt[], const int idx)
+{
+   int n = ArraySize(lvl);
+   for(int k = idx; k < n - 1; k++)
+   {
+      lvl[k] = lvl[k + 1];
+      cnt[k] = cnt[k + 1];
+   }
+   ArrayResize(lvl, n - 1);
+   ArrayResize(cnt, n - 1);
+}
+
+//+------------------------------------------------------------------+
+//| Hap 2 pozicione me te njejtin SL: njeri me TP1, tjetri me TP2.    |
+//| tp1Only: te dy mbyllen ne TP1 (hyrjet KTHIM).                     |
+//+------------------------------------------------------------------+
+void OpenSetup(const int dir, const double slPips, const bool tp1Only, const string tag)
 {
    double lots = NormalizeLots(InpLots);
    double pip  = InpPipSize;
+   double tp2Pips = tp1Only ? InpTP1Pips : InpTP2Pips;
 
    if(dir > 0)
    {
       double price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      double sl  = NormalizeDouble(price - InpSLPips  * pip, _Digits);
+      double sl  = NormalizeDouble(price - slPips     * pip, _Digits);
       double tp1 = NormalizeDouble(price + InpTP1Pips * pip, _Digits);
-      double tp2 = NormalizeDouble(price + InpTP2Pips * pip, _Digits);
+      double tp2 = NormalizeDouble(price + tp2Pips    * pip, _Digits);
 
-      if(!trade.Buy(lots, _Symbol, 0, sl, tp1, "TP1"))
+      if(!trade.Buy(lots, _Symbol, 0, sl, tp1, tag + " TP1"))
       {
-         Print("Buy TP1 deshtoi: ", trade.ResultRetcodeDescription());
+         Print("Buy ", tag, " TP1 deshtoi: ", trade.ResultRetcodeDescription());
          return;   // pa TP1 nuk hapim as TP2
       }
-      if(!trade.Buy(lots, _Symbol, 0, sl, tp2, "TP2"))
-         Print("Buy TP2 deshtoi: ", trade.ResultRetcodeDescription());
+      if(!trade.Buy(lots, _Symbol, 0, sl, tp2, tag + " TP2"))
+         Print("Buy ", tag, " TP2 deshtoi: ", trade.ResultRetcodeDescription());
    }
    else
    {
       double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      double sl  = NormalizeDouble(price + InpSLPips  * pip, _Digits);
+      double sl  = NormalizeDouble(price + slPips     * pip, _Digits);
       double tp1 = NormalizeDouble(price - InpTP1Pips * pip, _Digits);
-      double tp2 = NormalizeDouble(price - InpTP2Pips * pip, _Digits);
+      double tp2 = NormalizeDouble(price - tp2Pips    * pip, _Digits);
 
-      if(!trade.Sell(lots, _Symbol, 0, sl, tp1, "TP1"))
+      if(!trade.Sell(lots, _Symbol, 0, sl, tp1, tag + " TP1"))
       {
-         Print("Sell TP1 deshtoi: ", trade.ResultRetcodeDescription());
+         Print("Sell ", tag, " TP1 deshtoi: ", trade.ResultRetcodeDescription());
          return;
       }
-      if(!trade.Sell(lots, _Symbol, 0, sl, tp2, "TP2"))
-         Print("Sell TP2 deshtoi: ", trade.ResultRetcodeDescription());
+      if(!trade.Sell(lots, _Symbol, 0, sl, tp2, tag + " TP2"))
+         Print("Sell ", tag, " TP2 deshtoi: ", trade.ResultRetcodeDescription());
    }
 }
 
@@ -222,6 +481,31 @@ void ManageBreakEven()
             if(!trade.PositionModify(ticket, newSL, tp))
                Print("Break-even deshtoi: ", trade.ResultRetcodeDescription());
       }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| 1 = robot ka buy te hapura, -1 = sell, 0 = asgje                  |
+//+------------------------------------------------------------------+
+int MyPositionsDir()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(PositionGetTicket(i) == 0 || !IsMyPosition()) continue;
+      return PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY ? 1 : -1;
+   }
+   return 0;
+}
+
+//+------------------------------------------------------------------+
+void CloseMyPositions()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !IsMyPosition()) continue;
+      if(!trade.PositionClose(ticket))
+         Print("Mbyllja deshtoi: ", trade.ResultRetcodeDescription());
    }
 }
 

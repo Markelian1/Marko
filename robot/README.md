@@ -1,47 +1,46 @@
 # TrendScalperXAU: robot për arin (MT5)
 
-Robot (Expert Advisor) për **MetaTrader 5**, i ndërtuar sipas asaj që tregon historiku i 23.09.2026:
-ndjek trendin, hap dy pozicione në të njëjtin nivel (TP1 i shpejtë dhe TP2 që vrapon) dhe **nuk përdor martingale**.
+Robot (Expert Advisor) për **MetaTrader 5** me të njëjtën logjikë si indikatori `TrendScalperXAU.pine`.
+Punon në grafikun **M1** (i ndryshueshëm) dhe **nuk përdor martingale**.
 
 ## Si funksionon
 
-1. **Trendi (M15):** EMA 50 mbi EMA 200 dhe çmimi mbi EMA 50 → vetëm **buy**.
-   EMA 50 nën EMA 200 dhe çmimi nën EMA 50 → vetëm **sell**. Përndryshe nuk hyn.
-2. **Hyrja (M5):** qiriri i fundit **preku EMA 20** (pullback) dhe u mbyll në drejtim të trendit.
-3. **Hap 2 pozicione 0.01 lot:**
-   - Pozicioni 1: TP = **20 pips**
-   - Pozicioni 2: TP = **50 pips**
-   - SL = **30 pips** për të dyja
-4. **Break-even:** kur merret TP1, SL e pozicionit 2 kalon 1 pip mbi hyrje. Nga ky moment ky trade nuk humb.
-5. **Vetëm një hyrje në të njëjtën kohë.** Pozicioni i ri hapet vetëm pasi mbyllen të mëparshmit.
+**1. Hyrjet TREND (3 timeframe):**
+- Trendi merret nga **H1, M15 dhe M5** (EMA 21 / EMA 50). M5 jep drejtimin, M15 nuk duhet të jetë kundër tij.
+- Hyrja: qiriri i fundit **preku EMA 20** dhe u mbyll në drejtim të trendit. SL = 30 pips.
+- Kur M5 është kundër H1 = **KTHIM**: të dy pozicionet mbyllen te TP1.
+
+**2. Hyrjet SWEEP (likuiditet):**
+- Roboti mban mend **fundet dhe majat** e fundit (swing), aty ku rrinë stop-et.
+- Kur çmimi **i kalon me bisht** (deri në 30 pips) dhe brenda 2 qirinjve **mbyllet përsëri mbrapa nivelit**, hyn në anën e kundërt, **pavarësisht trendit**.
+- SL = pas bishtit + 5 pips (min 15, max 40). Nëse ka pozicion të hapur në anën e kundërt, e mbyll.
+- SWEEP ka përparësi para TREND.
+
+**Çdo hyrje hap 2 pozicione:** TP1 = **20 pips**, TP2 = **50 pips**. Pas TP1, SL e pozicionit 2 kalon 1 pip mbi hyrje.
+Komentet e pozicioneve (`SWEEP TP1`, `TREND TP2`, `KTHIM TP1`) tregojnë pse hyri roboti.
 
 > 1 pip në ar = 0.10 $ lëvizje çmimi. Me 0.01 lot: 20 pips = 2 $, 50 pips = 5 $.
 
-## Rezultatet e mundshme të një hyrjeje (0.01 lot)
+## Parametrat kryesorë
 
-| Skenari | Pips | Fitimi |
-|---|---|---|
-| SL para TP1 | −60 | −6 $ |
-| TP1, pastaj break-even | +21 | ~+2.1 $ |
-| TP1 + TP2 | +70 | +7 $ |
-
-## Parametrat
-
-| Parametri | Vlera fillestare | Çfarë bën |
+| Parametri | Vlera | Çfarë bën |
 |---|---|---|
 | `InpLots` | 0.01 | Loti për secilin pozicion |
-| `InpPipSize` | 0.10 | Madhësia e 1 pip-i në ar |
 | `InpTP1Pips` / `InpTP2Pips` | 20 / 50 | Objektivat |
-| `InpSLPips` | 30 | Stop loss |
-| `InpBreakEven` | true | SL në hyrje pas TP1 |
-| `InpTrendTF` | M15 | Timeframe-i i trendit |
-| `InpEntryTF` | M5 | Timeframe-i i hyrjes |
+| `InpSLPips` | 30 | SL për hyrjet TREND |
+| `InpEntryTF` | M1 | Grafiku ku kërkohen hyrjet |
+| `InpTFHigh` / `InpTFMid` / `InpTFLow` | H1 / M15 / M5 | Trendi nga 3 timeframe |
+| `InpAllowKthim` | true | Lejon hyrje kundër trendit H1 (vetëm TP1) |
+| `InpUseSweep` | true | Hyrjet pas marrjes së likuiditetit |
+| `InpEqTolPips` | 20 | Toleranca për fundet/majat e barabarta |
+| `InpNeedEqual` | false | true = vetëm fundet/majat e dyfishta |
+| `InpMaxSweepPips` | 30 | Më thellë se kaq = thyerje, jo sweep |
+| `InpSweepMinSL` / `InpSweepMaxSL` | 15 / 40 | Kufijtë e SL për SWEEP |
+| `InpFlipOpposite` | true | SWEEP mbyll pozicionin e kundërt |
 | `InpMaxSpreadPips` | 4 | Nuk hyn kur spread-i është i madh |
-| `InpStartHour` / `InpEndHour` | 3 / 21 | Orari i hyrjeve (ora e serverit) |
-| `InpDailyProfitStop` | 0 | Ndalon për sot pas këtij fitimi (0 = pa limit) |
+| `InpStartHour` / `InpEndHour` | 3 / 21 | Orari (ora e serverit) |
 | `InpDailyLossStop` | 12 | Ndalon për sot pas kësaj humbjeje |
 | `InpMaxSetupsPerDay` | 10 | Numri maksimal i hyrjeve në ditë |
-| `InpMagic` | 20260923 | Numri që dallon trade-t e robotit |
 
 ## Si ta instalosh
 
@@ -62,6 +61,7 @@ ndjek trendin, hap dy pozicione në të njëjtin nivel (TP1 i shpejtë dhe TP2 q
 ## E rëndësishme
 
 - Ky robot **nuk është kopje** e robotit nga fotot. Kodi i atij roboti nuk dihet; ky ndjek të njëjtën ide.
+- Për hyrjet SWEEP roboti përdor gjithmonë qirinj të mbyllur, prandaj hyn pak më vonë se indikatori në grafik (në hapjen e qiririt tjetër).
 - Kodi **nuk është testuar ende** në MT5. Mund të ketë nevojë për rregullime pas kompilimit dhe backtest-it.
 - **Asnjë robot nuk garanton fitim çdo ditë.** Me 0.01 lot, 30–40 € në ditë kërkon rreth 300–400 pips neto, pra shumë hyrje fituese. Në ditë pa trend, ky robot do të hyjë pak ose do të humbasë.
 
