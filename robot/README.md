@@ -1,3 +1,15 @@
+# FadeImpulseXAU: hyrje kundër lëvizjes së fortë (MT5, M5)
+
+`FadeImpulseXAU.mq5` është setup-i i vetëm që doli pozitiv në testin me të dhënat XAUUSD M5 (28.04.2025 – 23.09.2026):
+
+- Brenda **8 qirinjve M5 (40 min)** çmimi lëviz **≥ 200 pips**.
+- Fundi (për BUY) ose maja (për SELL) është në 2 qirinjtë e fundit dhe qiriri i fundit mbyllet në anën e kundërt.
+- Hyrje në treg, **SL pas ekstremit + 5 pips (max 100)**, **TP = 3R**. Orari 09–21, max 3 hyrje në ditë.
+
+Rezultati i testit (pips, me spread-in real, pa komision): **732 hyrje, PF 1.32, +10,209 pips, DD 1,781 pips**,
+2/3 e parë PF 1.39, 1/3 e fundit PF 1.23, 13 nga 18 muaj pozitivë.
+Kujdes: qershor–shtator 2026 ishte afërsisht zero, dhe i njëjti rregull në M1 humbi. Testeri është te `backtest/`.
+
 # LimitLevelXAU: urdhra LIMIT te majat dhe fundet e H1 (MT5)
 
 `LimitLevelXAU.mq5` ndjek hyrjet manuale të 23.09 (SELL LIMIT 4377.47 mbi majat e H1, BUY / BUY LIMIT pas rënies):
