@@ -1,3 +1,16 @@
+# KeyLevelXAU: robot që hyn vetëm te nivelet kyçe (MT5)
+
+`KeyLevelXAU.mq5` tregton si hyrjet manuale: **SELL te rezistenca, BUY te mbështetja**, vetëm kur plotësohen të gjitha kushtet.
+
+1. **Nivelet kyçe:** majat dhe fundet e rëndësishme në **M15** (2 ditët e fundit) + High/Low e ditës së kaluar. Vizatohen me vija të verdha.
+2. **Prekja:** çmimi arrin nivelin (brenda 15 pips) ose e kalon me bisht (deri në 40 pips). Më thellë = niveli u thye, nuk tregtohet më sot.
+3. **Konfirmimi në M1 (brenda 15 qirinjve):** qiriri mbyllet përsëri mbrapa nivelit dhe nën fundin (ose mbi majën) e 3 qirinjve të fundit.
+4. **SL** pas bishtit + 5 pips (20–60 pips). **TP** = niveli kyç tjetër. Hyn vetëm nëse deri aty ka të paktën **2R**.
+5. **1 ose 2 pozicione:** nëse objektivi është ≥ 3R hap 2 (TP1 = 1R, TP2 = niveli tjetër, pastaj break-even), përndryshe 1.
+6. Çdo nivel përdoret **një herë në ditë**, maksimumi **4 hyrje në ditë**, vetëm **09:00–21:00** (London + New York).
+
+Në fund të testit, tab-i **Journal** tregon hyrjet, fituesit dhe fitimin neto për BUY dhe SELL.
+
 # TrendScalperXAU: robot për arin (MT5)
 
 Robot (Expert Advisor) për **MetaTrader 5** me të njëjtën logjikë si indikatori `TrendScalperXAU.pine`.
