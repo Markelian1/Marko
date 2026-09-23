@@ -46,3 +46,21 @@ Results with these settings:
 - The results come from one instrument and 17 months of data. Forward-test the strategy on a demo account before trading it live.
 
 Run it yourself with: `pip install pandas numpy numba && python3 opt.py XAUUSD_history.csv`
+
+## v2.1: structural improvements (`bt2.py`)
+
+The first MT5 Strategy Tester run covered Jan–Sep 2026 and gave PF 1.11, +4.6% and a 10.6% drawdown. That matches the Python replica for the same window (PF 1.12, +5.6R, 10.2R drawdown).
+
+Each idea below is a change to how the strategy trades, not a parameter tweak. An idea was accepted only if it improved **both** 2025 and 2026.
+
+| Variant | All PF | Net R | Max DD (R) | 2025 PF | 2026 PF |
+|---|---|---|---|---|---|
+| Baseline v2.0 | 1.31 | 22.6 | 10.2 | 1.65 | 1.12 |
+| **+ H4 trend filter (adopted)** | **1.38** | **22.8** | **7.6** | 1.61 | **1.23** |
+| Chandelier trail 3×ATR after TP1 | 1.26 | 20.1 | 9.0 | 1.43 | 1.15 |
+| Buy/sell-stop entry above the trigger bar | 1.24 | 15.4 | 9.2 | 1.48 | 1.09 |
+| Time exit after 32 bars | 1.24 | 16.2 | 7.8 | 1.46 | 1.10 |
+
+With the H4 filter, the nearby settings still give PF 1.21–1.46: ADX 15/25, TP2 2.5/4, session ±1h and cooldown 5/20.
+Session 16–23 and cooldown 20 looked even better, but they were **not** adopted, to avoid tuning to this sample.
+On the 5m chart the edge disappears (2025 PF 0.96), so keep using 15m.

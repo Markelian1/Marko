@@ -16,6 +16,8 @@ baseLen = input.int(200, "Trend EMA", minval = 10, group = grpT)
 useHtf  = input.bool(true, "Higher-timeframe filter", group = grpT)
 htfTf   = input.timeframe("60", "HTF timeframe", group = grpT)
 htfLen  = input.int(50, "HTF EMA", minval = 1, group = grpT)
+useHtf2 = input.bool(true, "Second HTF filter", group = grpT)
+htf2Tf  = input.timeframe("240", "HTF2 timeframe", group = grpT)
 
 grpQ = "Signal quality"
 useAdx      = input.bool(true, "ADX trend-strength filter", group = grpQ)
@@ -61,8 +63,10 @@ rsi     = ta.rsi(close, rsiLen)
 // Non-repainting HTF values: last *closed* HTF bar
 htfClose = request.security(syminfo.tickerid, htfTf, close[1], lookahead = barmerge.lookahead_on)
 htfEma   = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfLen)[1], lookahead = barmerge.lookahead_on)
-htfBull  = not useHtf or htfClose > htfEma
-htfBear  = not useHtf or htfClose < htfEma
+htf2Close = request.security(syminfo.tickerid, htf2Tf, close[1], lookahead = barmerge.lookahead_on)
+htf2Ema   = request.security(syminfo.tickerid, htf2Tf, ta.ema(close, htfLen)[1], lookahead = barmerge.lookahead_on)
+htfBull  = (not useHtf or htfClose > htfEma) and (not useHtf2 or htf2Close > htf2Ema)
+htfBear  = (not useHtf or htfClose < htfEma) and (not useHtf2 or htf2Close < htf2Ema)
 
 inSession = not useSession or not na(time(timeframe.period, sessionStr, sessionTz))
 volOk     = not useVol or atr >= atrAvg * volRatio

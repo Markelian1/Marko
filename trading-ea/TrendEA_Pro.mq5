@@ -4,7 +4,7 @@
 //|  the TradingView "TrendEA Pro" scripts). A trade opens only when |
 //|  ALL of these agree on the last closed bar:                      |
 //|   1. EMA stack in trend order (fast > slow > trend EMA for buys) |
-//|   2. Higher-timeframe close vs HTF EMA agrees (last closed bar)  |
+//|   2. H1 and H4 closes vs their EMA 50 agree (last closed bars)   |
 //|   3. ADX (Wilder) >= min and DI+/DI- agree with the direction    |
 //|   4. Price pulled back to the fast EMA, closes held the slow EMA |
 //|   5. Confirmation candle closes beyond the previous bar          |
@@ -14,7 +14,7 @@
 //|  Defaults = settings validated on XAUUSD M15 (see backtest/).    |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "2.00"
+#property version   "2.10"
 
 #include <Trade/Trade.mqh>
 
@@ -23,6 +23,8 @@ input ENUM_TIMEFRAMES InpTF       = PERIOD_M15; // Signal timeframe
 input bool            InpUseHTF   = true;       // Higher-timeframe filter
 input ENUM_TIMEFRAMES InpHTF      = PERIOD_H1;  // HTF timeframe
 input int             InpHTFEMA   = 50;         // HTF EMA period
+input bool            InpUseHTF2  = true;       // Second higher-timeframe filter
+input ENUM_TIMEFRAMES InpHTF2     = PERIOD_H4;  // HTF2 timeframe (same EMA period)
 
 input group "Trend"
 input int InpFastEMA = 21;   // Fast EMA
@@ -66,7 +68,7 @@ input int    InpSlippage = 20;           // Max slippage in points
 input string InpComment  = "TrendEA Pro";
 
 CTrade   trade;
-int      hFast, hSlow, hBase, hATR, hRSI, hADX, hHTF;
+int      hFast, hSlow, hBase, hATR, hRSI, hADX, hHTF, hHTF2;
 datetime lastBarTime = 0;
 datetime lastSignalTime = 0;
 double   dayStartBalance = 0.0;
@@ -93,7 +95,9 @@ int OnInit()
    hRSI  = iRSI(_Symbol, InpTF, InpRSIPeriod, PRICE_CLOSE);
    hADX  = iADXWilder(_Symbol, InpTF, InpADXPeriod);
    hHTF  = iMA(_Symbol, InpHTF, InpHTFEMA, 0, MODE_EMA, PRICE_CLOSE);
-   if(hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE || hBase == INVALID_HANDLE ||
+   hHTF2 = iMA(_Symbol, InpHTF2, InpHTFEMA, 0, MODE_EMA, PRICE_CLOSE);
+   if(hHTF2 == INVALID_HANDLE ||
+      hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE || hBase == INVALID_HANDLE ||
       hATR == INVALID_HANDLE || hRSI == INVALID_HANDLE || hADX == INVALID_HANDLE || hHTF == INVALID_HANDLE)
    {
       Print("Failed to create indicator handles, error ", GetLastError());
@@ -115,6 +119,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(hRSI);
    IndicatorRelease(hADX);
    IndicatorRelease(hHTF);
+   IndicatorRelease(hHTF2);
 }
 
 //+------------------------------------------------------------------+
@@ -175,20 +180,16 @@ bool EvaluateSignal(int &dir, double &sl)
    for(int i = 1; i <= 50; i++) atrAvg += atr[i];
    atrAvg /= 50.0;
 
-   // HTF: the HTF bar before the one containing the signal bar (non-repainting)
    bool htfBull = true, htfBear = true;
-   if(InpUseHTF)
+   if(InpUseHTF && !HTFTrend(hHTF, InpHTF, r[1].time, htfBull, htfBear))
+      return false;
+   if(InpUseHTF2)
    {
-      int hs = iBarShift(_Symbol, InpHTF, r[1].time) + 1;
-      double he[];
-      ArraySetAsSeries(he, true);
-      if(CopyBuffer(hHTF, 0, hs, 1, he) != 1)
+      bool b2 = true, s2 = true;
+      if(!HTFTrend(hHTF2, InpHTF2, r[1].time, b2, s2))
          return false;
-      double hc = iClose(_Symbol, InpHTF, hs);
-      if(hc == 0.0)
-         return false;
-      htfBull = hc > he[0];
-      htfBear = hc < he[0];
+      htfBull = htfBull && b2;
+      htfBear = htfBear && s2;
    }
 
    MqlDateTime bt;
@@ -232,6 +233,24 @@ bool EvaluateSignal(int &dir, double &sl)
 
    if(buy)       { dir = 1;  sl = slL; }
    else if(sell) { dir = -1; sl = slS; }
+   return true;
+}
+
+//+------------------------------------------------------------------+
+// Trend of a higher timeframe, using the HTF bar before the one that contains
+// the signal bar (non-repainting). Returns false if data is not ready.
+bool HTFTrend(const int handle, const ENUM_TIMEFRAMES tf, const datetime t, bool &bull, bool &bear)
+{
+   int hs = iBarShift(_Symbol, tf, t) + 1;
+   double he[];
+   ArraySetAsSeries(he, true);
+   if(hs <= 0 || CopyBuffer(handle, 0, hs, 1, he) != 1)
+      return false;
+   double hc = iClose(_Symbol, tf, hs);
+   if(hc == 0.0)
+      return false;
+   bull = hc > he[0];
+   bear = hc < he[0];
    return true;
 }
 
