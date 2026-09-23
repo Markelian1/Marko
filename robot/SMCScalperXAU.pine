@@ -1,0 +1,337 @@
+//@version=6
+// SMC Scalper XAU (grafik 1m)
+// Hyrja kur:
+//   - merret likuiditeti (sweep): cmimi kalon nje swing high/low ose PDH/PDL me bisht dhe mbyllet mbrapa nivelit
+//   - preket nje Order Block (OB) i krijuar nga nje thyerje strukture (BOS)
+// Ana e hyrjes: sweep poshte / OB bullish -> BUY, sweep lart / OB bearish -> SELL, vetem ne drejtim te trendit 15m.
+// Cdo hyrje = 2 pozicione: TP1 20 pips, TP2 50 pips, SL pas nivelit, break-even pas TP1.
+indicator("SMC Scalper XAU", shorttitle = "SMCXAU", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 200)
+
+// ───── Inputet ─────
+grpTP    = "Take Profit (ne pips)"
+pipSize  = input.float(0.10, "1 pip =", step = 0.01, group = grpTP, tooltip = "Ne ar 1 pip = 0.10$ levizje cmimi")
+tp1Pips  = input.int(20, "TP1", minval = 1, group = grpTP)
+tp2Pips  = input.int(50, "TP2", minval = 1, group = grpTP)
+useBE    = input.bool(true, "Break-even pas TP1", group = grpTP)
+beOffset = input.int(1, "Break-even + pips", minval = 0, group = grpTP)
+
+grpSL    = "Stop Loss (ne pips)"
+slBuffer = input.int(5, "SL pas bishtit / OB me", minval = 0, group = grpSL)
+minSL    = input.int(15, "SL minimal", minval = 1, group = grpSL)
+maxSL    = input.int(40, "SL maksimal", minval = 1, group = grpSL, tooltip = "Nese SL del me i madh, hyrja anulohet")
+
+grpLiq   = "Likuiditeti"
+useLiq   = input.bool(true, "Hyr pas marrjes se likuiditetit (sweep)", group = grpLiq)
+pvLen    = input.int(5, "Forca e swing-ut (qirinj majtas/djathtas)", minval = 2, maxval = 30, group = grpLiq)
+usePD    = input.bool(true, "Perfshi High/Low e dites se kaluar (PDH/PDL)", group = grpLiq)
+showLiq  = input.bool(true, "Shfaq nivelet e likuiditetit", group = grpLiq)
+
+grpOB    = "Order Block"
+useOB    = input.bool(true, "Hyr kur preket OB", group = grpOB)
+obLook   = input.int(10, "Kerko qirinjen e OB deri ne (qirinj mbrapa)", minval = 1, maxval = 50, group = grpOB)
+obMax    = input.int(5, "OB aktive per cdo ane", minval = 1, maxval = 20, group = grpOB)
+showOB   = input.bool(true, "Shfaq OB", group = grpOB)
+
+grpTrend = "Filtri i trendit"
+useTrend = input.bool(true, "Hyr vetem ne drejtim te trendit", group = grpTrend)
+trendTF  = input.timeframe("15", "Timeframe i trendit", group = grpTrend)
+fastLen  = input.int(50, "EMA e shpejte", minval = 1, group = grpTrend)
+slowLen  = input.int(200, "EMA e ngadalte", minval = 1, group = grpTrend)
+
+grpTime  = "Orari"
+useSess  = input.bool(false, "Vetem brenda orarit", group = grpTime)
+sess     = input.session("0300-2100", "Orari (ora e burses ne grafik)", group = grpTime)
+
+grpView  = "Pamja"
+lotSize  = input.float(0.01, "Loti per pozicion (per llogaritjen ne $)", step = 0.01, group = grpView)
+showEMA  = input.bool(false, "Shfaq EMA-t e trendit", group = grpView)
+showBg   = input.bool(true, "Ngjyros sfondin sipas trendit", group = grpView)
+
+// ───── Trendi ne 15m (vetem qirinj te mbyllur, pa repaint) ─────
+htfFast  = request.security(syminfo.tickerid, trendTF, ta.ema(close, fastLen)[1], lookahead = barmerge.lookahead_on)
+htfSlow  = request.security(syminfo.tickerid, trendTF, ta.ema(close, slowLen)[1], lookahead = barmerge.lookahead_on)
+htfClose = request.security(syminfo.tickerid, trendTF, close[1], lookahead = barmerge.lookahead_on)
+
+trend     = htfFast > htfSlow and htfClose > htfFast ? 1 : htfFast < htfSlow and htfClose < htfFast ? -1 : 0
+trendUpOk = not useTrend or trend == 1
+trendDnOk = not useTrend or trend == -1
+
+// ───── Likuiditeti: swing high / low ─────
+ph = ta.pivothigh(high, pvLen, pvLen)
+pl = ta.pivotlow(low, pvLen, pvLen)
+
+var float swingHigh  = na
+var float swingLow   = na
+var bool  highSwept  = false
+var bool  highBroken = false
+var bool  lowSwept   = false
+var bool  lowBroken  = false
+
+if not na(ph)
+    swingHigh  := ph
+    highSwept  := false
+    highBroken := false
+if not na(pl)
+    swingLow  := pl
+    lowSwept  := false
+    lowBroken := false
+
+bool bosUp   = false   // mbyllje mbi swing high = thyerje strukture lart
+bool bosDn   = false
+bool liqBuy  = false   // sweep poshte -> BUY
+bool liqSell = false   // sweep lart -> SELL
+
+if not na(swingHigh) and not highBroken and high > swingHigh
+    if close > swingHigh
+        highBroken := true
+        bosUp      := true
+    else if not highSwept
+        highSwept := true
+        liqSell   := useLiq
+
+if not na(swingLow) and not lowBroken and low < swingLow
+    if close < swingLow
+        lowBroken := true
+        bosDn     := true
+    else if not lowSwept
+        lowSwept := true
+        liqBuy   := useLiq
+
+// ───── Likuiditeti: High / Low e dites se kaluar ─────
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_on)
+pdl = request.security(syminfo.tickerid, "D", low[1],  lookahead = barmerge.lookahead_on)
+
+var bool pdhTaken = false
+var bool pdlTaken = false
+if timeframe.change("D")
+    pdhTaken := false
+    pdlTaken := false
+
+if usePD and not na(pdh) and not pdhTaken and high > pdh
+    pdhTaken := true
+    if close < pdh and useLiq
+        liqSell := true
+if usePD and not na(pdl) and not pdlTaken and low < pdl
+    pdlTaken := true
+    if close > pdl and useLiq
+        liqBuy := true
+
+// ───── Order Blocks ─────
+type OB
+    float top
+    float bottom
+    int   bar
+    box   bx
+
+var array<OB> bullOBs = array.new<OB>()
+var array<OB> bearOBs = array.new<OB>()
+
+// OB bullish = qiriri i fundit i kuq para levizjes qe theu strukturen lart
+if bosUp
+    for i = 1 to obLook
+        if close[i] < open[i]
+            ob = OB.new(high[i], low[i], bar_index)
+            if showOB
+                ob.bx := box.new(bar_index - i, high[i], bar_index, low[i], border_color = color.new(color.green, 40), bgcolor = color.new(color.green, 85), extend = extend.right)
+            bullOBs.push(ob)
+            if bullOBs.size() > obMax
+                box.delete(bullOBs.shift().bx)
+            break
+
+// OB bearish = qiriri i fundit jeshil para levizjes qe theu strukturen poshte
+if bosDn
+    for i = 1 to obLook
+        if close[i] > open[i]
+            ob = OB.new(high[i], low[i], bar_index)
+            if showOB
+                ob.bx := box.new(bar_index - i, high[i], bar_index, low[i], border_color = color.new(color.red, 40), bgcolor = color.new(color.red, 85), extend = extend.right)
+            bearOBs.push(ob)
+            if bearOBs.size() > obMax
+                box.delete(bearOBs.shift().bx)
+            break
+
+// Prekja e OB: hyrje ne prekjen e pare. OB fshihet kur perdoret ose kur cmimi mbyllet pertej tij.
+bool  obBuy    = false
+bool  obSell   = false
+float obBuySL  = na
+float obSellSL = na
+
+if bullOBs.size() > 0
+    for j = bullOBs.size() - 1 to 0
+        ob = bullOBs.get(j)
+        if close < ob.bottom
+            box.delete(ob.bx)
+            bullOBs.remove(j)
+        else if bar_index > ob.bar and low <= ob.top and not obBuy
+            obBuy   := useOB
+            obBuySL := ob.bottom
+            box.delete(ob.bx)
+            bullOBs.remove(j)
+
+if bearOBs.size() > 0
+    for j = bearOBs.size() - 1 to 0
+        ob = bearOBs.get(j)
+        if close > ob.top
+            box.delete(ob.bx)
+            bearOBs.remove(j)
+        else if bar_index > ob.bar and high >= ob.bottom and not obSell
+            obSell   := useOB
+            obSellSL := ob.top
+            box.delete(ob.bx)
+            bearOBs.remove(j)
+
+// ───── Sinjalet ─────
+inSess  = not useSess or not na(time(timeframe.period, sess))
+buySig  = (liqBuy or obBuy) and trendUpOk
+sellSig = (liqSell or obSell) and trendDnOk
+if buySig and sellSig
+    buySig  := false
+    sellSig := false
+
+// ───── Simulimi i trade-ve ─────
+var int   dir       = 0      // 1 = buy, -1 = sell, 0 = pa pozicion
+var float entry     = na
+var float sl        = na
+var float tp1       = na
+var float tp2       = na
+var float slDist    = na     // SL ne pips per kete hyrje
+var bool  tp1Hit    = false
+var float setupPips = 0.0
+var int   entryBar  = na
+var line  lnEntry   = na
+var line  lnSL      = na
+var line  lnTP1     = na
+var line  lnTP2     = na
+
+var int   setups    = 0
+var int   nLiq      = 0
+var int   nOB       = 0
+var int   wins      = 0
+var int   losses    = 0
+var float totalPips = 0.0
+
+bool closedNow = false
+
+// Daljet kontrollohen nga qiriri pas hyrjes. Nese SL dhe TP preken ne te njejtin qiri, llogaritet SL (rasti me i keq).
+if dir != 0 and bar_index > entryBar
+    hitSL  = dir == 1 ? low <= sl : high >= sl
+    hitTP1 = dir == 1 ? high >= tp1 : low <= tp1
+    hitTP2 = dir == 1 ? high >= tp2 : low <= tp2
+    if not tp1Hit
+        if hitSL
+            setupPips -= 2 * slDist
+            closedNow := true
+        else if hitTP1
+            tp1Hit := true
+            setupPips += tp1Pips
+            if hitTP2
+                setupPips += tp2Pips
+                closedNow := true
+            else if useBE
+                sl := entry + dir * beOffset * pipSize
+                line.set_x2(lnSL, bar_index)
+                lnSL := line.new(bar_index, sl, bar_index, sl, color = color.orange, width = 2)
+    else
+        if hitSL
+            setupPips += dir * (sl - entry) / pipSize
+            closedNow := true
+        else if hitTP2
+            setupPips += tp2Pips
+            closedNow := true
+
+if dir != 0
+    line.set_x2(lnEntry, bar_index)
+    line.set_x2(lnSL, bar_index)
+    line.set_x2(lnTP1, bar_index)
+    line.set_x2(lnTP2, bar_index)
+
+if closedNow
+    totalPips += setupPips
+    if setupPips > 0
+        wins += 1
+    else
+        losses += 1
+    resultText = (setupPips > 0 ? "+" : "") + str.tostring(setupPips, "#.#") + " pips"
+    label.new(bar_index, dir == 1 ? high : low, resultText,
+         style = dir == 1 ? label.style_label_down : label.style_label_up,
+         color = setupPips > 0 ? color.new(color.green, 10) : color.new(color.red, 10),
+         textcolor = color.white, size = size.small)
+    dir    := 0
+    tp1Hit := false
+
+// Hyrja: ne mbylljen e qiririt 1m qe preku nivelin, vetem kur nuk ka pozicion te hapur
+bool enteredLong  = false
+bool enteredShort = false
+if dir == 0 and barstate.isconfirmed and inSess and (buySig or sellSig)
+    d     = buySig ? 1 : -1
+    isLiq = d == 1 ? liqBuy : liqSell
+    isOB  = d == 1 ? obBuy : obSell
+    // SL pas bishtit te sweep-it ose pas OB-se, plus buffer
+    slRef = d == 1 ? (isOB ? math.min(low, obBuySL) : low) : (isOB ? math.max(high, obSellSL) : high)
+    dist  = math.max(minSL, d * (close - slRef) / pipSize + slBuffer)
+    if dist <= maxSL
+        dir       := d
+        entry     := close
+        slDist    := dist
+        sl        := entry - dir * slDist  * pipSize
+        tp1       := entry + dir * tp1Pips * pipSize
+        tp2       := entry + dir * tp2Pips * pipSize
+        tp1Hit    := false
+        setupPips := 0.0
+        entryBar  := bar_index
+        setups    += 1
+        nLiq      += isLiq ? 1 : 0
+        nOB       += isOB ? 1 : 0
+        lnEntry   := line.new(bar_index, entry, bar_index, entry, color = color.gray)
+        lnSL      := line.new(bar_index, sl,    bar_index, sl,    color = color.red, width = 2)
+        lnTP1     := line.new(bar_index, tp1,   bar_index, tp1,   color = color.teal, style = line.style_dashed)
+        lnTP2     := line.new(bar_index, tp2,   bar_index, tp2,   color = color.green, width = 2)
+        why = isLiq and isOB ? "LIQ+OB" : isLiq ? "LIQ" : "OB"
+        label.new(bar_index, 0, (dir == 1 ? "BUY " : "SELL ") + why,
+             yloc = dir == 1 ? yloc.belowbar : yloc.abovebar,
+             style = dir == 1 ? label.style_label_up : label.style_label_down,
+             color = dir == 1 ? color.green : color.red, textcolor = color.white, size = size.small)
+        enteredLong  := dir == 1
+        enteredShort := dir == -1
+
+// ───── Grafiku ─────
+plot(showLiq and not highSwept and not highBroken ? swingHigh : na, "Likuiditet lart",  color = color.new(color.red, 30),   style = plot.style_linebr)
+plot(showLiq and not lowSwept  and not lowBroken  ? swingLow  : na, "Likuiditet poshte", color = color.new(color.green, 30), style = plot.style_linebr)
+plot(showLiq and usePD ? pdh : na, "PDH", color = color.new(color.gray, 20), style = plot.style_linebr, linewidth = 2)
+plot(showLiq and usePD ? pdl : na, "PDL", color = color.new(color.gray, 20), style = plot.style_linebr, linewidth = 2)
+plot(showEMA ? htfFast : na, "EMA trend e shpejte", color = color.blue)
+plot(showEMA ? htfSlow : na, "EMA trend e ngadalte", color = color.purple, linewidth = 2)
+bgcolor(showBg and trend == 1 ? color.new(color.green, 94) : showBg and trend == -1 ? color.new(color.red, 94) : na)
+
+plotshape(liqBuy,  "Sweep poshte", shape.xcross, location.belowbar, color.new(color.green, 30), size = size.tiny)
+plotshape(liqSell, "Sweep lart",   shape.xcross, location.abovebar, color.new(color.red, 30),   size = size.tiny)
+
+alertcondition(enteredLong,  "SMCXAU Buy",  "SMC Scalper XAU: BUY")
+alertcondition(enteredShort, "SMCXAU Sell", "SMC Scalper XAU: SELL")
+
+// ───── Tabela e rezultateve ─────
+var table stats = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 15), border_width = 1)
+if barstate.islast
+    usdPerPip = pipSize * 100 * lotSize   // 1 lot ar = 100 ons
+    closed    = wins + losses
+    winRate   = closed > 0 ? 100.0 * wins / closed : 0.0
+    txt       = color.white
+    table.cell(stats, 0, 0, "SMC Scalper XAU", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 0, trend == 1 ? "Trend LART" : trend == -1 ? "Trend POSHTE" : "Pa trend",
+         text_color = trend == 1 ? color.lime : trend == -1 ? color.red : color.gray, text_size = size.small)
+    table.cell(stats, 0, 1, "Hyrje",           text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 1, str.tostring(setups), text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 2, "Nga LIQ / OB",    text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 2, str.tostring(nLiq) + " / " + str.tostring(nOB), text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 3, "Fitues",          text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 3, str.tostring(wins),   text_color = color.lime, text_size = size.small)
+    table.cell(stats, 0, 4, "Humbes",          text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 4, str.tostring(losses), text_color = color.red, text_size = size.small)
+    table.cell(stats, 0, 5, "Win rate",        text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 5, str.tostring(winRate, "#.#") + " %", text_color = txt, text_size = size.small)
+    table.cell(stats, 0, 6, "Pips gjithsej",   text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 6, str.tostring(totalPips, "#.#"), text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 7, "Fitimi (" + str.tostring(lotSize) + " lot x2)", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 7, str.tostring(totalPips * usdPerPip, "#.##") + " $", text_color = totalPips >= 0 ? color.lime : color.red, text_size = size.small)
+    table.cell(stats, 0, 8, "Pozicion i hapur", text_color = txt, text_size = size.small)
+    table.cell(stats, 1, 8, dir == 1 ? "BUY" : dir == -1 ? "SELL" : "-", text_color = txt, text_size = size.small)

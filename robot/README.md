@@ -84,3 +84,17 @@ ndjek trendin, hap dy pozicione në të njëjtin nivel (TP1 i shpejtë dhe TP2 q
 5. Për njoftime: **Alert → Condition: TSXAU → TSXAU Buy / TSXAU Sell**.
 
 > Rezultatet në tabelë janë simulim mbi qirinjtë e grafikut. Nuk përfshijnë spread-in dhe komisionin, dhe kur SL dhe TP preken në të njëjtin qiri llogaritet SL. Në tregtim real rezultati do të jetë pak më i ulët.
+
+## Indikatori SMC për 1 minutë (Likuiditet + Order Block)
+
+`SMCScalperXAU.pine` është për grafikun **XAUUSD 1m**. Hyn vetëm kur:
+
+- **merret likuiditeti (LIQ):** çmimi kalon me bisht një swing high/low ose High/Low e ditës së kaluar dhe mbyllet mbrapa nivelit.
+  Kur merret likuiditeti poshtë hyn **BUY**, kur merret lart hyn **SELL**.
+- **preket Order Block-u (OB):** pas një thyerjeje strukture (BOS), qiriri i fundit në drejtim të kundërt bëhet OB (kutia jeshile/e kuqe).
+  Kur çmimi kthehet dhe e prek për herë të parë, te OB bullish hyn **BUY** dhe te OB bearish hyn **SELL**.
+- **trendi 15m** (EMA 50/200) është në të njëjtin drejtim. Filtri mund të çaktivizohet.
+
+SL vendoset **pas bishtit ose pas OB-së + 5 pips**, minimum 15 dhe maksimum 40 pips. Nëse del më i madh, hyrja anulohet.
+TP1 = 20 pips, TP2 = 50 pips, dhe pas TP1 SL-ja kalon te hyrja (break-even).
+Në grafik, etiketa **BUY LIQ / BUY OB / SELL LIQ+OB** tregon pse hyri, dhe ✕ tregon ku u mor likuiditeti.
