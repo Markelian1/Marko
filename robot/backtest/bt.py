@@ -205,3 +205,61 @@ def setup_C(win=8, move=200, buf=5, maxsl=100, conf=0, tpm='rr', rr=3.0, fib=0.5
         if d * (tp - e) < minrr * risk: continue
         bk.open(i + 1, d, e, slp, tp, 0); dcount += 1; pend = None
     return bk.trades
+
+# ---------------- Setup D: B + prag sipas volatilitetit + filtri i trendit ----------------
+def _prep():
+    tr = [H[i] - L[i] for i in range(N)]
+    avg = [0.0] * N; s = 0.0; w = 288
+    for i in range(N):
+        s += tr[i]
+        if i >= w: s -= tr[i - w]
+        avg[i] = s / min(i + 1, w)
+    return avg
+AVG = _prep()
+_EMA = {}
+def ema(n):
+    if n not in _EMA:
+        a = 2 / (n + 1); e = C[0]; out = []
+        for c in C: e = e + a * (c - e); out.append(e)
+        _EMA[n] = out
+    return _EMA[n]
+
+def setup_D(win=8, move=200, katr=0, rr=5.0, buf=5, maxsl=100, slatr=0, maxbars=24, h0=9, h1=21,
+            maxday=3, dirs=(1, -1), trend=0, tlen=600, cooldown=0, maxtp=0, fixtp=0):
+    """katr>0: levizja minimale = katr x mesatarja e qirinjve M5 te 24 oreve (ne vend te 'move' pips)
+       slatr>0: SL maksimal = slatr x ajo mesatare
+       trend: 0 pa filter, 1 vetem ne drejtim te EMA(tlen) (BUY mbi, SELL nen), -1 vetem kunder
+       cooldown: sa qirinj pritet pas nje hyrjeje"""
+    bk = Book(); bk.maxbars = maxbars
+    E = ema(tlen) if trend else None
+    day, dcount, last = None, 0, -10**9
+    for i in range(max(win, 288), N - 1):
+        if T[i].date() != day: day, dcount = T[i].date(), 0
+        bk.step(i)
+        if bk.pos is not None or not hours_ok(i, h0, h1) or dcount >= maxday or i - last < cooldown: continue
+        hs = H[i - win + 1:i + 1]; ls = L[i - win + 1:i + 1]
+        mx, mn = max(hs), min(ls)
+        thr = katr * AVG[i] if katr else move * PIP
+        if mx - mn < thr: continue
+        imx = hs.index(mx); imn = ls.index(mn)
+        msl = slatr * AVG[i] if slatr else maxsl * PIP
+        d = 0
+        if 1 in dirs and imx < imn and imn >= win - 2 and C[i] > O[i]: d = 1
+        elif -1 in dirs and imn < imx and imx >= win - 2 and C[i] < O[i]: d = -1
+        if d == 0: continue
+        if trend and trend * d * (C[i] - E[i]) < 0: continue
+        if d == 1:
+            e = O[i + 1] + S[i + 1]; slp = mn - buf * PIP; risk = e - slp
+        else:
+            e = O[i + 1]; slp = mx + buf * PIP + S[i + 1]; risk = slp - e
+        if not (0 < risk <= msl): continue
+        tpd = rr * risk
+        if fixtp: tpd = fixtp * PIP
+        elif maxtp: tpd = min(tpd, maxtp * PIP)
+        bk.open(i + 1, d, e, slp, e + d * tpd, 0); dcount += 1; last = i
+    return bk.trades
+
+LAST4 = next(i for i in range(N) if T[i] >= dt.datetime(2026, 5, 20))
+def show3(name, tr):
+    a, b, c, al = stats(tr, 0, SPLIT), stats(tr, SPLIT, N), stats(tr, LAST4, N), stats(tr, 0, N)
+    print(f"{name:48s} | IS PF={a['pf']:.2f} n={a['n']:4d} | OOS PF={b['pf']:.2f} n={b['n']:4d} | 4 muajt PF={c['pf']:.2f} net={c['net']:6.0f} | ALL PF={al['pf']:.2f} net={al['net']:6.0f} dd={al['dd']:5.0f}")

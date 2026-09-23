@@ -36,6 +36,7 @@ input group "SL / TP"
 input int    InpSLBufPips       = 5;      // SL pas ekstremit (pips)
 input int    InpMaxSLPips       = 100;    // SL me i madh = pa hyrje
 input double InpRR              = 5.0;    // TP = kaq here SL
+input int    InpMaxTPPips       = 0;      // TP jo me larg se kaq pips (0 = pa kufi)
 input int    InpMaxHoldMin      = 120;    // Mbyll pozicionin pas kaq minutash (0 = pa kufi)
 
 input group "Kufizime"
@@ -110,7 +111,7 @@ void OnTick()
       double risk = ask - sl;
       if(risk > 0 && risk <= InpMaxSLPips * pip)
       {
-         double tp = ask + InpRR * risk;
+         double tp = ask + TPDistance(risk);
          if(!trade.Buy(NormalizeLots(InpLots), _Symbol, 0, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), "BUY FADE"))
             Print("BUY deshtoi: ", trade.ResultRetcodeDescription());
       }
@@ -125,11 +126,19 @@ void OnTick()
       double risk = sl - bid;
       if(risk > 0 && risk <= InpMaxSLPips * pip)
       {
-         double tp = bid - InpRR * risk;
+         double tp = bid - TPDistance(risk);
          if(!trade.Sell(NormalizeLots(InpLots), _Symbol, 0, NormalizeDouble(sl, _Digits), NormalizeDouble(tp, _Digits), "SELL FADE"))
             Print("SELL deshtoi: ", trade.ResultRetcodeDescription());
       }
    }
+}
+
+//+------------------------------------------------------------------+
+double TPDistance(const double risk)
+{
+   double d = InpRR * risk;
+   if(InpMaxTPPips > 0) d = MathMin(d, InpMaxTPPips * InpPipSize);
+   return d;
 }
 
 //+------------------------------------------------------------------+
