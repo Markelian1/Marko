@@ -1,0 +1,120 @@
+//@version=5
+// Nivele SD (devijim standard) per XAUUSD - strategji per backtest.
+//
+// Ideja (nga formula e postimit x1_xent):
+//   njesia (1 SD) = levizja "normale" e cmimit
+//   niveli        = P_C + k x njesia
+// SELL kur cmimi zgjatet shume lart nga P_C, BUY kur zgjatet shume poshte,
+// me pritjen qe cmimi te kthehet mbrapsht (mean reversion).
+//
+// Si "Ore x √ore" njesia = SD e levizjes per 1 ore x √(ore ne dite).
+// Kjo eshte interpretimi yne i formules (4.50 x 4.8); autori nuk e shpjegon.
+//
+// Vetem per testim: Strategy Tester ne TradingView + llogari demo.
+// Perdore ne grafik 5m-15m.
+strategy("Nivele SD XAUUSD [test]", overlay = true, initial_capital = 10000, currency = currency.USD,
+     default_qty_type = strategy.fixed, default_qty_value = 1, pyramiding = 0,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 0.2)
+
+// ---------- Inputs ----------
+grpL = "Nivelet"
+refMode    = input.string("Mbyllja e djeshme", "Çmimi reference (P_C)", options = ["Mbyllja e djeshme", "Hapja e ditës"], group = grpL)
+unitMode   = input.string("Orë × √orë", "Njësia (1 SD)", options = ["Orë × √orë", "Ditore", "Manuale"], group = grpL)
+hourLen    = input.int(120, "Sa orë për volatilitetin", minval = 10, group = grpL)
+hoursDay   = input.float(23, "Orë tregtimi në ditë", minval = 1, group = grpL)
+dayLen     = input.int(20, "Sa ditë për volatilitetin", minval = 5, group = grpL)
+manualUnit = input.float(21.6, "Njësia manuale", minval = 0.01, group = grpL)
+
+grpT = "Tregtimi"
+kEntry    = input.float(2.6, "Hyrja (SD)", minval = 0.1, step = 0.1, group = grpT)
+kStop     = input.float(3.2, "Stop loss (SD)", minval = 0.1, step = 0.1, group = grpT)
+kTp       = input.float(1.0, "Take profit (SD, 0 = te P_C)", minval = 0.0, step = 0.1, group = grpT)
+allowSell = input.bool(true, "Lejo SELL", group = grpT)
+allowBuy  = input.bool(true, "Lejo BUY", group = grpT)
+maxTrades = input.int(1, "Maks. tregtime në ditë", minval = 1, group = grpT)
+closeEod  = input.bool(true, "Mbyll çdo pozitë në fund të ditës", group = grpT)
+
+showTable = input.bool(true, "Trego tabelën me nivelet", group = "Pamja")
+
+if kStop <= kEntry or kTp >= kEntry
+    runtime.error("Duhet: Take profit < Hyrja < Stop loss (në SD).")
+
+// ---------- Te dhenat (pa shikuar ne te ardhmen) ----------
+[prevClose, dayOpen, daySd] = request.security(syminfo.tickerid, "D", [close[1], open, ta.stdev(ta.change(close), dayLen)[1]], lookahead = barmerge.lookahead_on)
+hourSd = request.security(syminfo.tickerid, "60", ta.stdev(ta.change(close), hourLen)[1], lookahead = barmerge.lookahead_on)
+
+// ---------- Dita ----------
+newDay       = timeframe.change("D")
+lastBarOfDay = time_close == time_close("D")
+
+var float ref  = na
+var float unit = na
+var int   dayStartCount = 0
+
+if newDay
+    ref  := refMode == "Mbyllja e djeshme" ? prevClose : dayOpen
+    unit := unitMode == "Manuale" ? manualUnit : unitMode == "Ditore" ? daySd : hourSd * math.sqrt(hoursDay)
+    dayStartCount := strategy.closedtrades + strategy.opentrades
+    if closeEod and strategy.position_size != 0
+        strategy.close_all(comment = "Fund dite", immediately = true)
+
+sellEntry = ref + kEntry * unit
+sellStop  = ref + kStop * unit
+sellTp    = ref + kTp * unit
+buyEntry  = ref - kEntry * unit
+buyStop   = ref - kStop * unit
+buyTp     = ref - kTp * unit
+
+// ---------- Hyrjet ----------
+tradesToday = strategy.closedtrades + strategy.opentrades - dayStartCount
+canTrade    = not na(ref) and not na(unit) and strategy.position_size == 0 and tradesToday < maxTrades and not lastBarOfDay
+ocaName     = "hyrja_" + str.tostring(time("D")) + "_" + str.tostring(tradesToday)
+
+if canTrade
+    if allowSell
+        strategy.entry("SELL", strategy.short, limit = sellEntry, oca_name = ocaName, oca_type = strategy.oca.cancel)
+    if allowBuy
+        strategy.entry("BUY", strategy.long, limit = buyEntry, oca_name = ocaName, oca_type = strategy.oca.cancel)
+else
+    strategy.cancel("SELL")
+    strategy.cancel("BUY")
+
+// ---------- Daljet (SL/TP ngrihen ne nivelet e dites kur hyn) ----------
+var float sStop = na
+var float sTp   = na
+var float bStop = na
+var float bTp   = na
+if strategy.position_size == 0
+    sStop := sellStop
+    sTp   := sellTp
+    bStop := buyStop
+    bTp   := buyTp
+
+strategy.exit("SL/TP SELL", from_entry = "SELL", stop = sStop, limit = sTp, comment_loss = "SL", comment_profit = "TP")
+strategy.exit("SL/TP BUY", from_entry = "BUY", stop = bStop, limit = bTp, comment_loss = "SL", comment_profit = "TP")
+
+if closeEod and lastBarOfDay
+    strategy.cancel_all()
+    strategy.close_all(comment = "Fund dite", immediately = true)
+
+// ---------- Vizatimi ----------
+plot(newDay ? na : ref,       "P_C",       color = color.gray, style = plot.style_linebr)
+plot(newDay ? na : sellEntry, "SELL",      color = color.red, style = plot.style_linebr, linewidth = 2)
+plot(newDay ? na : sellStop,  "SL i SELL", color = color.new(color.red, 60), style = plot.style_linebr)
+plot(newDay ? na : sellTp,    "TP i SELL", color = color.new(color.orange, 30), style = plot.style_linebr)
+plot(newDay ? na : buyEntry,  "BUY",       color = color.teal, style = plot.style_linebr, linewidth = 2)
+plot(newDay ? na : buyStop,   "SL i BUY",  color = color.new(color.teal, 60), style = plot.style_linebr)
+plot(newDay ? na : buyTp,     "TP i BUY",  color = color.new(color.blue, 30), style = plot.style_linebr)
+
+var table info = table.new(position.top_right, 2, 5, bgcolor = color.new(color.gray, 85), border_width = 1)
+if showTable and barstate.islast and not na(unit)
+    table.cell(info, 0, 0, "P_C", text_color = chart.fg_color, text_size = size.small)
+    table.cell(info, 1, 0, str.tostring(ref, format.mintick), text_color = chart.fg_color, text_size = size.small)
+    table.cell(info, 0, 1, "1 SD", text_color = chart.fg_color, text_size = size.small)
+    table.cell(info, 1, 1, str.tostring(unit, "#.##"), text_color = chart.fg_color, text_size = size.small)
+    table.cell(info, 0, 2, "SELL / SL", text_color = color.red, text_size = size.small)
+    table.cell(info, 1, 2, str.tostring(sellEntry, format.mintick) + " / " + str.tostring(sellStop, format.mintick), text_color = color.red, text_size = size.small)
+    table.cell(info, 0, 3, "BUY / SL", text_color = color.teal, text_size = size.small)
+    table.cell(info, 1, 3, str.tostring(buyEntry, format.mintick) + " / " + str.tostring(buyStop, format.mintick), text_color = color.teal, text_size = size.small)
+    table.cell(info, 0, 4, "TP sell / buy", text_color = chart.fg_color, text_size = size.small)
+    table.cell(info, 1, 4, str.tostring(sellTp, format.mintick) + " / " + str.tostring(buyTp, format.mintick), text_color = chart.fg_color, text_size = size.small)
