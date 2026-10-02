@@ -142,3 +142,18 @@ These defaults are the centre of the robust region, not its best corner (N55 k2)
 Profit comes in bursts: by quarter it was 6.2, 18.1, 13.7, **47.7**, 0.6 and **−5.7** R, and 9 of 18 months were positive.
 
 At risk r% per trade, expect roughly 80·r % return and 13·r % drawdown over the 17 months. For example, 0.3% gives about +24% with a 4% drawdown.
+
+## DonchianEA v1.1: fixed TP and breakeven (`tpbe.py`)
+
+These tests use a **full** TP at X·R plus a move to breakeven (+0.1R) once price has gone BE·R in favour, on top of the chandelier trail. The baseline is H1 N40 k3 with no TP.
+
+| TP | BE | Trades | Win % | PF (2025/2026) | Net R | Max DD (R) |
+|---|---|---|---|---|---|---|
+| none | off | 164 | 42.1 | 1.46 (1.46/1.46) | 24.1 | 8.2 |
+| none | 1R | 164 | 43.9 | 1.47 (1.46/1.49) | 24.7 | 8.1 |
+| 2R | 1R | 192 | 41.7 | 1.35 | 22.2 | 6.9 |
+| 3R | 1R | 174 | 42.0 | 1.40 | 23.0 | 8.1 |
+| **4R** | **1R** | 167 | **43.7** | **1.47 (1.46/1.48)** | **25.0** | **8.1** |
+| 5R | 1R | 165 | 44.2 | 1.47 | 24.4 | 8.1 |
+
+The new defaults are TP 4R and BE at 1R. A breakeven at 1.5R or later never triggers before the trail, so it changes nothing.

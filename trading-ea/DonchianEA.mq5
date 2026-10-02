@@ -3,13 +3,14 @@
 //|  Donchian channel breakout with a chandelier ATR trailing stop.  |
 //|  - Entry: H1 close breaks the highest high / lowest low of the   |
 //|    previous N bars, in the direction of the 200 EMA.             |
-//|  - Exit: no fixed TP. Initial stop k x ATR; then the stop trails |
-//|    the highest high (lowest low) since entry by k x ATR.         |
+//|  - Exit: initial stop k x ATR; then the stop trails the highest  |
+//|    high (lowest low) since entry by k x ATR. Optional fixed TP    |
+//|    (R multiple) and breakeven once price has moved BE x R.       |
 //|  Designed to run next to TrendEA_Pro (different magic number).   |
 //|  Defaults = centre of the robust region on XAUUSD H1 (backtest/).|
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "1.00"
+#property version   "1.10"
 
 #include <Trade/Trade.mqh>
 
@@ -20,6 +21,11 @@ input bool            InpUseTrend  = true;      // Trade only with the trend EMA
 input int             InpTrendEMA  = 200;       // Trend EMA period
 input int             InpATRPeriod = 14;        // ATR period
 input double          InpATRMult   = 3.0;       // Initial stop and trailing distance (ATR x)
+
+input group "Take profit / Breakeven"
+input double InpTPR      = 4.0;  // Take profit in R (0 = no TP, trail only)
+input double InpBEAtR    = 1.0;  // Move SL to breakeven after price moves this many R (0 = off)
+input double InpBELockR  = 0.1;  // Breakeven lock: SL = entry + this many R (covers spread)
 
 input group "Risk"
 input double InpRiskPercent     = 0.5;  // Risk per trade, % of balance
@@ -118,6 +124,7 @@ void OpenTrade(const int dir, const double slDist)
    double price   = dir == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double dist    = MathMax(slDist, minStop);
    double sl      = NormalizeDouble(price - dir * dist, digits);
+   double tp      = InpTPR > 0.0 ? NormalizeDouble(price + dir * dist * InpTPR, digits) : 0.0;
 
    double lots = InpFixedLot > 0.0 ? InpFixedLot : LotsForRisk(dist);
    lots = NormalizeLots(lots);
@@ -126,14 +133,15 @@ void OpenTrade(const int dir, const double slDist)
       Print("Lot size below broker minimum for this risk, signal skipped.");
       return;
    }
-   bool ok = dir == 1 ? trade.Buy(lots, _Symbol, price, sl, 0.0, InpComment)
-                      : trade.Sell(lots, _Symbol, price, sl, 0.0, InpComment);
+   bool ok = dir == 1 ? trade.Buy(lots, _Symbol, price, sl, tp, InpComment)
+                      : trade.Sell(lots, _Symbol, price, sl, tp, InpComment);
    if(!ok)
       Print("Order failed: ", trade.ResultRetcode(), " ", trade.ResultRetcodeDescription());
 }
 
 //+------------------------------------------------------------------+
-// Chandelier stop: extreme since entry -/+ k x ATR, only ever tightened.
+// Breakeven + chandelier stop: extreme since entry -/+ k x ATR.
+// The stop is only ever tightened; the TP is left unchanged.
 void TrailStop(const ulong ticket, const double atr)
 {
    if(!PositionSelectByTicket(ticket))
@@ -152,10 +160,19 @@ void TrailStop(const ulong ticket, const double atr)
    if(count < 1)
       return;
 
+   // Initial risk (1R) = k x ATR of the signal bar, the bar before the entry bar
+   double open = PositionGetDouble(POSITION_PRICE_OPEN);
+   double risk = 0.0;
+   double atrEntry[];
+   if(CopyBuffer(hATR, 0, openShift + 1, 1, atrEntry) == 1)
+      risk = InpATRMult * atrEntry[0];
+
    if(isBuy)
    {
       double ext = iHigh(_Symbol, InpTF, iHighest(_Symbol, InpTF, MODE_HIGH, count, 1));
       double newSL = NormalizeDouble(ext - InpATRMult * atr, digits);
+      if(InpBEAtR > 0.0 && risk > 0.0 && ext - open >= InpBEAtR * risk)
+         newSL = MathMax(newSL, NormalizeDouble(open + InpBELockR * risk, digits));
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       if(newSL > sl + point && bid - newSL > minStop)
          trade.PositionModify(ticket, newSL, tp);
@@ -164,6 +181,8 @@ void TrailStop(const ulong ticket, const double atr)
    {
       double ext = iLow(_Symbol, InpTF, iLowest(_Symbol, InpTF, MODE_LOW, count, 1));
       double newSL = NormalizeDouble(ext + InpATRMult * atr, digits);
+      if(InpBEAtR > 0.0 && risk > 0.0 && open - ext >= InpBEAtR * risk)
+         newSL = MathMin(newSL, NormalizeDouble(open - InpBELockR * risk, digits));
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if((sl == 0.0 || newSL < sl - point) && newSL - ask > minStop)
          trade.PositionModify(ticket, newSL, tp);
