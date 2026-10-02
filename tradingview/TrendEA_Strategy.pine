@@ -1,0 +1,122 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+// TrendEA — Strategy (backtestable)
+// EMA crossover trend-following strategy with RSI filter, ATR-based stop loss /
+// take profit, optional trailing stop, %-risk position sizing, session filter
+// and a daily loss limit. Port of the MetaTrader 5 TrendEA.
+strategy("TrendEA Strategy", shorttitle = "TrendEA", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     commission_type = strategy.commission.percent, commission_value = 0.05,
+     slippage = 2, pyramiding = 0, calc_on_every_tick = false)
+
+// ───── Inputs ─────
+grpS = "Strategy"
+fastLen     = input.int(20, "Fast EMA", minval = 1, group = grpS)
+slowLen     = input.int(50, "Slow EMA", minval = 2, group = grpS)
+rsiLen      = input.int(14, "RSI period", minval = 1, group = grpS)
+rsiBuyMin   = input.float(50.0, "Buy only if RSI above", group = grpS)
+rsiSellMax  = input.float(50.0, "Sell only if RSI below", group = grpS)
+tradeDir    = input.string("Both", "Direction", options = ["Both", "Long only", "Short only"], group = grpS)
+closeOnOpp  = input.bool(true, "Close / reverse on opposite signal", group = grpS)
+
+grpR = "Risk"
+useRiskPct  = input.bool(true, "Size by % risk (off = fixed quantity)", group = grpR)
+riskPct     = input.float(1.0, "Risk per trade, % of equity", minval = 0.01, step = 0.1, group = grpR)
+fixedQty    = input.float(1.0, "Fixed quantity", minval = 0, group = grpR)
+qtyStep     = input.float(0.01, "Quantity step (lot/contract increment)", minval = 0.00000001, group = grpR)
+atrLen      = input.int(14, "ATR period", minval = 1, group = grpR)
+slMult      = input.float(2.0, "Stop loss = ATR ×", minval = 0.1, step = 0.1, group = grpR)
+tpMult      = input.float(3.0, "Take profit = ATR × (0 = none)", minval = 0, step = 0.1, group = grpR)
+useTrail    = input.bool(true, "ATR trailing stop", group = grpR)
+trailMult   = input.float(1.5, "Trailing distance = ATR ×", minval = 0.1, step = 0.1, group = grpR)
+
+grpF = "Filters"
+sessionStr  = input.session("0000-0000", "Trading session (exchange time)", group = grpF)
+maxDailyLoss = input.float(5.0, "Stop for the day after % loss (0 = off)", minval = 0, group = grpF)
+
+// ───── Indicators ─────
+fastEma = ta.ema(close, fastLen)
+slowEma = ta.ema(close, slowLen)
+rsi     = ta.rsi(close, rsiLen)
+atr     = ta.atr(atrLen)
+
+crossUp   = ta.crossover(fastEma, slowEma)
+crossDown = ta.crossunder(fastEma, slowEma)
+
+// ───── Filters ─────
+inSession = not na(time(timeframe.period, sessionStr))
+
+var float dayStartEquity = strategy.initial_capital
+if timeframe.change("D")
+    dayStartEquity := strategy.equity
+dailyLossPct   = dayStartEquity > 0 ? (dayStartEquity - strategy.equity) / dayStartEquity * 100 : 0.0
+dailyLossOk    = maxDailyLoss <= 0 or dailyLossPct < maxDailyLoss
+
+allowLong  = tradeDir != "Short only"
+allowShort = tradeDir != "Long only"
+
+buySignal  = crossUp   and rsi > rsiBuyMin  and allowLong  and inSession and dailyLossOk
+sellSignal = crossDown and rsi < rsiSellMax and allowShort and inSession and dailyLossOk
+
+// ───── Position sizing ─────
+calcQty(float slDist) =>
+    float q = fixedQty
+    if useRiskPct
+        riskMoney = strategy.equity * riskPct / 100
+        lossPerUnit = slDist * syminfo.pointvalue
+        q := lossPerUnit > 0 ? riskMoney / lossPerUnit : 0.0
+    // Round down to the quantity step so risk is never exceeded
+    math.floor(q / qtyStep) * qtyStep
+
+// ───── Orders ─────
+slDist    = atr * slMult
+tpDist    = atr * tpMult
+trailDist = atr * trailMult
+trailTicks = math.max(1, math.round(trailDist / syminfo.mintick))
+qty = calcQty(slDist)
+
+var float stopLevel = na
+var float tpLevel   = na
+
+isLong  = strategy.position_size > 0
+isShort = strategy.position_size < 0
+canLong  = strategy.position_size == 0 or (closeOnOpp and isShort)
+canShort = strategy.position_size == 0 or (closeOnOpp and isLong)
+
+if buySignal and canLong and qty > 0
+    stopLevel := close - slDist
+    tpLevel   := tpMult > 0 ? close + tpDist : na
+    strategy.entry("Long", strategy.long, qty = qty)   // reverses an open short
+    strategy.exit("Long Exit", "Long", stop = stopLevel, limit = tpLevel,
+         trail_price = useTrail ? close + trailDist : na,
+         trail_offset = useTrail ? trailTicks : na)
+    alert("TrendEA BUY " + syminfo.ticker + " @ " + str.tostring(close, format.mintick) +
+         " SL " + str.tostring(stopLevel, format.mintick) +
+         (na(tpLevel) ? "" : " TP " + str.tostring(tpLevel, format.mintick)), alert.freq_once_per_bar_close)
+else if sellSignal and canShort and qty > 0
+    stopLevel := close + slDist
+    tpLevel   := tpMult > 0 ? close - tpDist : na
+    strategy.entry("Short", strategy.short, qty = qty) // reverses an open long
+    strategy.exit("Short Exit", "Short", stop = stopLevel, limit = tpLevel,
+         trail_price = useTrail ? close - trailDist : na,
+         trail_offset = useTrail ? trailTicks : na)
+    alert("TrendEA SELL " + syminfo.ticker + " @ " + str.tostring(close, format.mintick) +
+         " SL " + str.tostring(stopLevel, format.mintick) +
+         (na(tpLevel) ? "" : " TP " + str.tostring(tpLevel, format.mintick)), alert.freq_once_per_bar_close)
+else if closeOnOpp
+    // Opposite crossover without a confirmed new entry: just flatten
+    if crossDown and isLong
+        strategy.close("Long", comment = "Opposite cross")
+    if crossUp and isShort
+        strategy.close("Short", comment = "Opposite cross")
+
+// ───── Plots ─────
+plot(fastEma, "Fast EMA", color = color.new(color.teal, 0), linewidth = 2)
+plot(slowEma, "Slow EMA", color = color.new(color.orange, 0), linewidth = 2)
+plotshape(buySignal,  "Buy",  shape.triangleup,   location.belowbar, color.new(color.green, 0), size = size.small)
+plotshape(sellSignal, "Sell", shape.triangledown, location.abovebar, color.new(color.red, 0),   size = size.small)
+
+inPos = strategy.position_size != 0
+plot(inPos ? stopLevel : na, "Initial stop", color = color.new(color.red, 20),   style = plot.style_linebr)
+plot(inPos ? tpLevel   : na, "Take profit",  color = color.new(color.green, 20), style = plot.style_linebr)
+bgcolor(inSession ? na : color.new(color.gray, 90), title = "Outside session")

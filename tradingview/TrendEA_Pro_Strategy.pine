@@ -1,0 +1,152 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+// TrendEA Pro — Strategy (backtestable). Same signal logic as the TrendEA Pro indicator:
+// trend-pullback entries confirmed by EMA stack, HTF trend, ADX, RSI, volatility and session.
+// Exits: 50% at TP1, rest at TP2, stop moved to breakeven after TP1. Sized by % risk.
+strategy("TrendEA Pro Strategy", shorttitle = "TrendEA Pro", overlay = true,
+     initial_capital = 10000, currency = currency.USD,
+     commission_type = strategy.commission.percent, commission_value = 0.02,
+     slippage = 2, pyramiding = 0, process_orders_on_close = true)
+
+// ───── Inputs ─────
+grpT = "Trend"
+fastLen = input.int(21, "Fast EMA", minval = 1, group = grpT)
+slowLen = input.int(50, "Slow EMA", minval = 2, group = grpT)
+baseLen = input.int(200, "Trend EMA", minval = 10, group = grpT)
+useHtf  = input.bool(true, "Higher-timeframe filter", group = grpT)
+htfTf   = input.timeframe("60", "HTF timeframe", group = grpT)
+htfLen  = input.int(50, "HTF EMA", minval = 1, group = grpT)
+useHtf2 = input.bool(true, "Second HTF filter", group = grpT)
+htf2Tf  = input.timeframe("240", "HTF2 timeframe", group = grpT)
+
+grpQ = "Signal quality"
+useAdx      = input.bool(true, "ADX trend-strength filter", group = grpQ)
+adxLen      = input.int(14, "ADX length", minval = 1, group = grpQ)
+adxMin      = input.float(20, "Min ADX", group = grpQ)
+rsiLen      = input.int(14, "RSI length", minval = 1, group = grpQ)
+rsiMaxLong  = input.float(70, "Max RSI for longs", group = grpQ)
+rsiMinShort = input.float(30, "Min RSI for shorts", group = grpQ)
+pbLookback  = input.int(5, "Pullback lookback (bars)", minval = 1, group = grpQ)
+useVol      = input.bool(true, "Volatility filter", group = grpQ)
+volRatio    = input.float(0.8, "Min ATR vs its 50-bar average", step = 0.1, group = grpQ)
+cooldown    = input.int(10, "Min bars between signals", minval = 0, group = grpQ)
+
+grpR = "Risk"
+riskPct  = input.float(1.0, "Risk per trade, % of equity", minval = 0.01, step = 0.1, group = grpR)
+qtyStep  = input.float(0.01, "Quantity step (lot/contract increment)", minval = 0.00000001, group = grpR)
+atrLen   = input.int(14, "ATR length", minval = 1, group = grpR)
+swingLen = input.int(5, "Swing lookback for SL (bars)", minval = 1, group = grpR)
+slBuffer = input.float(0.8, "SL buffer (ATR ×)", minval = 0, step = 0.1, group = grpR)
+minSlAtr = input.float(0.5, "Min SL distance (ATR ×)", minval = 0.1, step = 0.1, group = grpR)
+maxSlAtr = input.float(3.0, "Max SL distance (ATR ×) — skip if wider", minval = 0.5, step = 0.1, group = grpR)
+tp1R     = input.float(1.0, "TP1 (R multiple, 50% close)", minval = 0.25, step = 0.25, group = grpR)
+tp2R     = input.float(3.0, "TP2 (R multiple)", minval = 0.5, step = 0.25, group = grpR)
+moveBE   = input.bool(true, "Move SL to breakeven after TP1", group = grpR)
+
+grpS = "Session"
+useSession = input.bool(true, "Only signal inside session", group = grpS)
+sessionStr = input.session("1200-2000", "Session", group = grpS)
+sessionTz  = input.string("UTC", "Session timezone", group = grpS)
+
+grpV = "Display"
+showEmas   = input.bool(true, "Show EMAs", group = grpV)
+
+// ───── Calculations ─────
+fastEma = ta.ema(close, fastLen)
+slowEma = ta.ema(close, slowLen)
+baseEma = ta.ema(close, baseLen)
+atr     = ta.atr(atrLen)
+atrAvg  = ta.sma(atr, 50)
+rsi     = ta.rsi(close, rsiLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+// Non-repainting HTF values: last *closed* HTF bar
+htfClose = request.security(syminfo.tickerid, htfTf, close[1], lookahead = barmerge.lookahead_on)
+htfEma   = request.security(syminfo.tickerid, htfTf, ta.ema(close, htfLen)[1], lookahead = barmerge.lookahead_on)
+htf2Close = request.security(syminfo.tickerid, htf2Tf, close[1], lookahead = barmerge.lookahead_on)
+htf2Ema   = request.security(syminfo.tickerid, htf2Tf, ta.ema(close, htfLen)[1], lookahead = barmerge.lookahead_on)
+htfBull  = (not useHtf or htfClose > htfEma) and (not useHtf2 or htf2Close > htf2Ema)
+htfBear  = (not useHtf or htfClose < htfEma) and (not useHtf2 or htf2Close < htf2Ema)
+
+inSession = not useSession or not na(time(timeframe.period, sessionStr, sessionTz))
+volOk     = not useVol or atr >= atrAvg * volRatio
+adxOkL    = not useAdx or (adx >= adxMin and diPlus > diMinus)
+adxOkS    = not useAdx or (adx >= adxMin and diMinus > diPlus)
+
+bullStack = fastEma > slowEma and slowEma > baseEma and close > baseEma
+bearStack = fastEma < slowEma and slowEma < baseEma and close < baseEma
+
+lowestLow    = ta.lowest(low, pbLookback)
+highestHigh  = ta.highest(high, pbLookback)
+lowestClose  = ta.lowest(close, pbLookback)
+highestClose = ta.highest(close, pbLookback)
+pullbackL = lowestLow <= fastEma and lowestClose > slowEma
+pullbackS = highestHigh >= fastEma and highestClose < slowEma
+
+triggerL = close > fastEma and close > open and close > high[1]
+triggerS = close < fastEma and close < open and close < low[1]
+
+rsiOkL = rsi > 50 and rsi < rsiMaxLong
+rsiOkS = rsi < 50 and rsi > rsiMinShort
+
+longSetup  = bullStack and htfBull and adxOkL and volOk and inSession and pullbackL and triggerL and rsiOkL
+shortSetup = bearStack and htfBear and adxOkS and volOk and inSession and pullbackS and triggerS and rsiOkS
+
+// Stop loss beyond the recent swing, clamped to [min, max] ATR
+swingLow  = ta.lowest(low, swingLen)
+swingHigh = ta.highest(high, swingLen)
+longSl  = math.min(swingLow - atr * slBuffer, close - atr * minSlAtr)
+shortSl = math.max(swingHigh + atr * slBuffer, close + atr * minSlAtr)
+longRiskOk  = close - longSl  <= atr * maxSlAtr
+shortRiskOk = shortSl - close <= atr * maxSlAtr
+
+// ───── Orders ─────
+var int   lastSigBar = na
+var float tEntry = na
+var float tSl    = na
+var float tTp1   = na
+var float tTp2   = na
+var float tQty   = na
+
+flat      = strategy.position_size == 0
+canSignal = barstate.isconfirmed and flat and (na(lastSigBar) or bar_index - lastSigBar >= cooldown)
+longSig   = canSignal and longSetup and longRiskOk
+shortSig  = canSignal and shortSetup and shortRiskOk and not longSig
+
+if longSig or shortSig
+    dir  = longSig ? 1 : -1
+    sl   = longSig ? longSl : shortSl
+    risk = math.abs(close - sl)
+    rawQty = risk > 0 ? strategy.equity * riskPct / 100 / (risk * syminfo.pointvalue) : 0.0
+    qty  = math.floor(rawQty / qtyStep) * qtyStep
+    if qty > 0
+        tEntry := close
+        tSl    := sl
+        tTp1   := close + dir * risk * tp1R
+        tTp2   := close + dir * risk * tp2R
+        tQty   := qty
+        lastSigBar := bar_index
+        id = longSig ? "Long" : "Short"
+        strategy.entry(id, longSig ? strategy.long : strategy.short, qty = qty)
+        strategy.exit(id + " TP1", id, qty_percent = 50, stop = tSl, limit = tTp1)
+        strategy.exit(id + " TP2", id, stop = tSl, limit = tTp2)
+        alert((longSig ? "TrendEA Pro BUY " : "TrendEA Pro SELL ") + syminfo.ticker +
+             " @ " + str.tostring(tEntry, format.mintick) + " | SL " + str.tostring(tSl, format.mintick) +
+             " | TP1 " + str.tostring(tTp1, format.mintick) + " | TP2 " + str.tostring(tTp2, format.mintick),
+             alert.freq_once_per_bar_close)
+
+// Breakeven: once TP1 has filled, move the remaining stop to entry
+if moveBE and not flat and math.abs(strategy.position_size) < tQty
+    tSl := tEntry
+    if strategy.position_size > 0
+        strategy.exit("Long TP2", "Long", stop = tEntry, limit = tTp2)
+    else
+        strategy.exit("Short TP2", "Short", stop = tEntry, limit = tTp2)
+
+// ───── Plots ─────
+plot(showEmas ? fastEma : na, "Fast EMA",  color = color.new(color.teal, 0), linewidth = 1)
+plot(showEmas ? slowEma : na, "Slow EMA",  color = color.new(color.orange, 0), linewidth = 1)
+plot(showEmas ? baseEma : na, "Trend EMA", color = color.new(color.purple, 0), linewidth = 2)
+plot(not flat ? tSl  : na, "Stop",  color = color.new(color.red, 0),   style = plot.style_linebr)
+plot(not flat ? tTp1 : na, "TP1",   color = color.new(color.green, 40), style = plot.style_linebr)
+plot(not flat ? tTp2 : na, "TP2",   color = color.new(color.green, 0),  style = plot.style_linebr)
