@@ -6,39 +6,50 @@
 //|  Per system:                                                     |
 //|   - Entry: closed bar breaks the highest high / lowest low of the|
 //|     previous N bars, in the direction of the 200 EMA.            |
-//|   - Exit: no fixed TP. Initial stop k x ATR, then a chandelier   |
-//|     stop k x ATR from the extreme since entry (only tightened).  |
-//|  Defaults = portfolio chosen on XAUUSD 2025-04..2026-09 (FP feed)|
-//|  where 81 of 118 tested portfolios had PF >= 1.3 in both years.  |
+//|   - Exit: initial stop k x ATR, chandelier trail k x ATR from the|
+//|     extreme since entry, optional TP (R) and breakeven at BE x R.|
+//|   - Volatility filter: trade only when ATR > ratio x its average.|
+//|  Defaults: H1 channels 20/60/100, k 2 - positive in all 7 years  |
+//|  of XAUUSD 2020-2026 in backtest (see backtest/RESULTS.md).      |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "1.00"
+#property version   "2.00"
 
 #include <Trade/Trade.mqh>
 
 input group "System 1"
 input bool            InpS1On  = true;        // System 1 enabled
-input ENUM_TIMEFRAMES InpS1TF  = PERIOD_M15;  // System 1 timeframe
-input int             InpS1N   = 80;          // System 1 channel (bars)
-input double          InpS1K   = 4.0;         // System 1 stop/trail (ATR x)
+input ENUM_TIMEFRAMES InpS1TF  = PERIOD_H1;   // System 1 timeframe
+input int             InpS1N   = 20;          // System 1 channel (bars)
+input double          InpS1K   = 2.0;         // System 1 stop/trail (ATR x)
 
 input group "System 2"
 input bool            InpS2On  = true;        // System 2 enabled
 input ENUM_TIMEFRAMES InpS2TF  = PERIOD_H1;   // System 2 timeframe
-input int             InpS2N   = 30;          // System 2 channel (bars)
-input double          InpS2K   = 3.5;         // System 2 stop/trail (ATR x)
+input int             InpS2N   = 60;          // System 2 channel (bars)
+input double          InpS2K   = 2.0;         // System 2 stop/trail (ATR x)
 
 input group "System 3"
 input bool            InpS3On  = true;        // System 3 enabled
 input ENUM_TIMEFRAMES InpS3TF  = PERIOD_H1;   // System 3 timeframe
-input int             InpS3N   = 60;          // System 3 channel (bars)
-input double          InpS3K   = 3.5;         // System 3 stop/trail (ATR x)
+input int             InpS3N   = 100;         // System 3 channel (bars)
+input double          InpS3K   = 2.0;         // System 3 stop/trail (ATR x)
+
+input group "Take profit / Breakeven"
+input double InpTPR     = 4.0;   // Take profit in R (0 = no TP, trail only)
+input double InpBEAtR   = 1.0;   // Move SL to breakeven after this many R (0 = off)
+input double InpBELockR = 0.1;   // Breakeven lock: SL = entry + this many R
+
+input group "Volatility filter"
+input bool   InpUseVolFilter = true;  // Trade only when ATR > ratio x its average
+input int    InpVolLookbackH1 = 1440; // ATR average length in H1 bars (~60 trading days; scaled to each TF)
+input double InpVolRatio     = 1.2;   // Min ATR / average ATR
 
 input group "Common"
 input bool   InpUseTrend        = true;  // Trade only with the trend EMA
 input int    InpTrendEMA        = 200;   // Trend EMA period (on each system's timeframe)
 input int    InpATRPeriod       = 14;    // ATR period
-input double InpRiskPercent     = 0.3;   // Risk per trade, % of balance (each system)
+input double InpRiskPercent     = 0.25;  // Risk per trade, % of balance (each system)
 input double InpFixedLot        = 0.0;   // Fixed lot per trade (0 = use risk %)
 input int    InpMaxSpreadPoints = 60;    // Max spread in points (0 = off)
 input double InpMaxDailyLossPct = 3.0;   // No new trades after this daily loss % (0 = off)
@@ -153,7 +164,7 @@ void RunSystem(Sys &s)
    int dir = 0;
    if(close1 > chHigh && (!InpUseTrend || close1 > ema[1])) dir = 1;
    else if(close1 < chLow && (!InpUseTrend || close1 < ema[1])) dir = -1;
-   if(dir == 0 || !TradingAllowed())
+   if(dir == 0 || !VolatilityOK(s, atr[1]) || !TradingAllowed())
       return;
 
    OpenTrade(s, dir, s.k * atr[1]);
@@ -168,6 +179,7 @@ void OpenTrade(const Sys &s, const int dir, const double slDist)
    double price   = dir == 1 ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double dist    = MathMax(slDist, minStop);
    double sl      = NormalizeDouble(price - dir * dist, digits);
+   double tp      = InpTPR > 0.0 ? NormalizeDouble(price + dir * dist * InpTPR, digits) : 0.0;
 
    double lots = NormalizeLots(InpFixedLot > 0.0 ? InpFixedLot : LotsForRisk(dist));
    if(lots <= 0.0)
@@ -177,8 +189,8 @@ void OpenTrade(const Sys &s, const int dir, const double slDist)
    }
    trade.SetExpertMagicNumber(s.magic);
    string comment = InpComment + " " + EnumToString(s.tf) + " N" + IntegerToString(s.n);
-   bool ok = dir == 1 ? trade.Buy(lots, _Symbol, price, sl, 0.0, comment)
-                      : trade.Sell(lots, _Symbol, price, sl, 0.0, comment);
+   bool ok = dir == 1 ? trade.Buy(lots, _Symbol, price, sl, tp, comment)
+                      : trade.Sell(lots, _Symbol, price, sl, tp, comment);
    if(!ok)
       Print("Order failed: ", trade.ResultRetcode(), " ", trade.ResultRetcodeDescription());
 }
@@ -201,11 +213,20 @@ void TrailStop(const Sys &s, const ulong ticket, const double atr)
    if(count < 1)
       return;
 
+   // Initial risk (1R) = k x ATR of the signal bar, the bar before the entry bar
+   double open = PositionGetDouble(POSITION_PRICE_OPEN);
+   double risk = 0.0;
+   double atrEntry[];
+   if(CopyBuffer(s.hATR, 0, count + 1, 1, atrEntry) == 1)
+      risk = s.k * atrEntry[0];
+
    trade.SetExpertMagicNumber(s.magic);
    if(isBuy)
    {
       double ext = iHigh(_Symbol, s.tf, iHighest(_Symbol, s.tf, MODE_HIGH, count, 1));
       double newSL = NormalizeDouble(ext - s.k * atr, digits);
+      if(InpBEAtR > 0.0 && risk > 0.0 && ext - open >= InpBEAtR * risk)
+         newSL = MathMax(newSL, NormalizeDouble(open + InpBELockR * risk, digits));
       double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       if(newSL > sl + point && bid - newSL > minStop)
          trade.PositionModify(ticket, newSL, tp);
@@ -214,10 +235,30 @@ void TrailStop(const Sys &s, const ulong ticket, const double atr)
    {
       double ext = iLow(_Symbol, s.tf, iLowest(_Symbol, s.tf, MODE_LOW, count, 1));
       double newSL = NormalizeDouble(ext + s.k * atr, digits);
+      if(InpBEAtR > 0.0 && risk > 0.0 && open - ext >= InpBEAtR * risk)
+         newSL = MathMin(newSL, NormalizeDouble(open - InpBELockR * risk, digits));
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       if((sl == 0.0 || newSL < sl - point) && newSL - ask > minStop)
          trade.PositionModify(ticket, newSL, tp);
    }
+}
+
+//+------------------------------------------------------------------+
+// True when the signal bar's ATR is at least InpVolRatio x its average
+// over ~InpVolLookbackH1 hours, measured on the system's own timeframe.
+bool VolatilityOK(const Sys &s, const double atrNow)
+{
+   if(!InpUseVolFilter)
+      return true;
+   int bars = (int)MathMax(50, (double)InpVolLookbackH1 * PeriodSeconds(PERIOD_H1) / PeriodSeconds(s.tf));
+   double hist[];
+   int got = CopyBuffer(s.hATR, 0, 1, bars, hist);
+   if(got < bars / 2)
+      return false; // not enough history yet
+   double sum = 0.0;
+   for(int i = 0; i < got; i++) sum += hist[i];
+   double avg = sum / got;
+   return avg > 0.0 && atrNow >= InpVolRatio * avg;
 }
 
 //+------------------------------------------------------------------+

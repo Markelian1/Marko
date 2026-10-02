@@ -6,21 +6,27 @@
 //|  - Exit: initial stop k x ATR; then the stop trails the highest  |
 //|    high (lowest low) since entry by k x ATR. Optional fixed TP    |
 //|    (R multiple) and breakeven once price has moved BE x R.       |
-//|  Designed to run next to TrendEA_Pro (different magic number).   |
-//|  Defaults = centre of the robust region on XAUUSD H1 (backtest/).|
+//|  - Volatility filter: only trade when ATR is above its average   |
+//|    (breakouts in quiet markets are mostly false).                |
+//|  Defaults validated on XAUUSD H1 2020-2026 (6 of 7 years > 0).   |
 //+------------------------------------------------------------------+
 #property copyright "Marko"
-#property version   "1.10"
+#property version   "2.00"
 
 #include <Trade/Trade.mqh>
 
 input group "Strategy"
 input ENUM_TIMEFRAMES InpTF        = PERIOD_H1; // Signal timeframe
-input int             InpChannel   = 40;        // Donchian channel length (bars)
+input int             InpChannel   = 60;        // Donchian channel length (bars)
 input bool            InpUseTrend  = true;      // Trade only with the trend EMA
 input int             InpTrendEMA  = 200;       // Trend EMA period
 input int             InpATRPeriod = 14;        // ATR period
-input double          InpATRMult   = 3.0;       // Initial stop and trailing distance (ATR x)
+input double          InpATRMult   = 2.0;       // Initial stop and trailing distance (ATR x)
+
+input group "Volatility filter"
+input bool   InpUseVolFilter = true;  // Trade only when ATR > ratio x its average
+input int    InpVolLookback  = 1440;  // ATR average length (bars; 1440 H1 bars ~ 60 trading days)
+input double InpVolRatio     = 1.2;   // Min ATR / average ATR
 
 input group "Take profit / Breakeven"
 input double InpTPR      = 4.0;  // Take profit in R (0 = no TP, trail only)
@@ -109,7 +115,7 @@ void OnTick()
    int dir = 0;
    if(close1 > chHigh && (!InpUseTrend || close1 > ema[1])) dir = 1;
    else if(close1 < chLow && (!InpUseTrend || close1 < ema[1])) dir = -1;
-   if(dir == 0 || !TradingAllowed())
+   if(dir == 0 || !VolatilityOK(atr[1]) || !TradingAllowed())
       return;
 
    OpenTrade(dir, InpATRMult * atr[1]);
@@ -187,6 +193,22 @@ void TrailStop(const ulong ticket, const double atr)
       if((sl == 0.0 || newSL < sl - point) && newSL - ask > minStop)
          trade.PositionModify(ticket, newSL, tp);
    }
+}
+
+//+------------------------------------------------------------------+
+// True when the signal bar's ATR is at least InpVolRatio x its average.
+bool VolatilityOK(const double atrNow)
+{
+   if(!InpUseVolFilter)
+      return true;
+   double hist[];
+   int got = CopyBuffer(hATR, 0, 1, InpVolLookback, hist);
+   if(got < InpVolLookback / 2)
+      return false; // not enough history yet
+   double sum = 0.0;
+   for(int i = 0; i < got; i++) sum += hist[i];
+   double avg = sum / got;
+   return avg > 0.0 && atrNow >= InpVolRatio * avg;
 }
 
 //+------------------------------------------------------------------+

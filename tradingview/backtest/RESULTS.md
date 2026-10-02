@@ -157,3 +157,31 @@ These tests use a **full** TP at X·R plus a move to breakeven (+0.1R) once pric
 | 5R | 1R | 165 | 44.2 | 1.47 | 24.4 | 8.1 |
 
 The new defaults are TP 4R and BE at 1R. A breakeven at 1.5R or later never triggers before the trail, so it changes nothing.
+
+## Long-term test, XAUUSD H1 2020-02 → 2026-10 (FP Trading export) (`lt.py`, `lt_grid.py`)
+
+The user's MT5 run of DonchianEA v1.1 from 2023 to 2026 gave PF 1.14 and a 10.6% drawdown. Equity was flat or falling from 2023 to early 2025. The H1 replica agrees:
+
+| DonchianEA v1.1 (N40 k3, no filter) | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 | Total |
+|---|---|---|---|---|---|---|---|---|
+| R | +17.0 | −11.5 | −9.6 | −2.0 | −1.4 | +21.6 | +14.2 | +28.3 R, PF 1.10, **DD 40R** |
+
+The 2025–26 edge depended on the market regime. In 2021–2024 gold ranged or trended weakly, and breakouts failed.
+
+**Regime filters tested** (12 Donchian variants each, median shown):
+
+| Filter | PF | Net R | DD (R) | Positive years (of 7) |
+|---|---|---|---|---|
+| none | 1.10 | 24.5 | 36.8 | 4 |
+| D1 ADX > 25 | 1.25 | 37.6 | 18.0 | 5 |
+| D1 efficiency ratio > 0.3 | 1.37 | 38.1 | 14.2 | 5 |
+| **H1 ATR(14) / its 60-day average > 1.2** | **1.42** | 27.4 | **7.1** | **5.5** |
+
+The ATR-ratio filter grid had 180 combinations: lookback 60/120/250 days, threshold 1.0–1.5, N 20–100 and k 2–4. **71% of them had PF ≥ 1.3** over 6.5 years. Lookback 60 is best, and thresholds 1.2–1.3 balance PF against trade count.
+
+| Adopted settings | Trades/wk | PF | Net R | DD (R) | 2020 | 2021 | 2022 | 2023 | 2024 | 2025 | 2026 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **DonchianEA v2.0**: N60 k2, filter 60d/1.2, TP4 BE1 | 0.78 | 1.65 | 49.2 | 5.9 | +4.4 | −0.2 | +1.5 | +5.5 | +4.6 | +21.1 | +12.2 |
+| **DonchianMulti v2.0**: N20 + N60 + N100, same settings | 2.4 | 1.60 | 149.9 | 17.8 | +10.7 | +0.4 | +11.7 | +21.0 | +10.4 | +58.9 | +36.8 |
+
+The multi-system version is positive in all 7 years. At 0.25% risk per system, the expected drawdown is about 4.5%, with roughly +37% over 6.5 years.

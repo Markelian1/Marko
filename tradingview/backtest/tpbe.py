@@ -27,14 +27,15 @@ def sim(h,l,c,spread,atr,day,sig,k,tpR,beR,beLock):
         if tr==0 and sig[i]!=0:
             tr=int(sig[i]); e=c[i]; risk=k*atr[i]; s=e-tr*risk; t=e+tr*risk*tpR; ext=e; eb=i; be=False
     return np.array(R),np.array(T)
-raw=load('fp_m5.csv'); days=raw.index.normalize().nunique(); d=raw.resample('60min').agg(AGG).dropna()
-c,h,l=d.Close,d.High,d.Low
-tr_=pd.concat([h-l,(h-c.shift()).abs(),(l-c.shift()).abs()],axis=1).max(axis=1); atr=rma(tr_,14); e200=ema(c,200)
-up=(c>h.shift().rolling(40).max())&(c>e200); dn=(c<l.shift().rolling(40).min())&(c<e200)
-sig=np.where(up,1,np.where(dn,-1,0)).astype(float); day=((d.index.normalize()-d.index[0].normalize()).days).values.astype(np.int64)
-rows=[]
-for tpR,beR in itertools.product([0,2,3,4,5,6],[0,1.0,1.5,2.0,3.0]):
-    if tpR and beR>=tpR: continue
-    R,T=sim(h.values,l.values,c.values,d.Spread.values.astype(float),atr.values,day,sig,3.0,float(tpR),beR,0.1)
-    s=sc(pd.Series(R,index=d.index[T]).sort_index(),days); rows.append(dict(TP=tpR or 'none',BE=beR or 'off',**s))
-df=pd.DataFrame(rows); pd.set_option('display.width',200); print(df.to_string())
+if __name__=="__main__":
+    raw=load('fp_m5.csv'); days=raw.index.normalize().nunique(); d=raw.resample('60min').agg(AGG).dropna()
+    c,h,l=d.Close,d.High,d.Low
+    tr_=pd.concat([h-l,(h-c.shift()).abs(),(l-c.shift()).abs()],axis=1).max(axis=1); atr=rma(tr_,14); e200=ema(c,200)
+    up=(c>h.shift().rolling(40).max())&(c>e200); dn=(c<l.shift().rolling(40).min())&(c<e200)
+    sig=np.where(up,1,np.where(dn,-1,0)).astype(float); day=((d.index.normalize()-d.index[0].normalize()).days).values.astype(np.int64)
+    rows=[]
+    for tpR,beR in itertools.product([0,2,3,4,5,6],[0,1.0,1.5,2.0,3.0]):
+        if tpR and beR>=tpR: continue
+        R,T=sim(h.values,l.values,c.values,d.Spread.values.astype(float),atr.values,day,sig,3.0,float(tpR),beR,0.1)
+        s=sc(pd.Series(R,index=d.index[T]).sort_index(),days); rows.append(dict(TP=tpR or 'none',BE=beR or 'off',**s))
+    df=pd.DataFrame(rows); pd.set_option('display.width',200); print(df.to_string())
